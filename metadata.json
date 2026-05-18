@@ -1,0 +1,8 @@
+{
+  "name": "DataLens AI",
+  "description": "An AI-powered data analytics and visualization tool.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
