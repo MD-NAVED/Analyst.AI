@@ -1,7 +1,3 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 # DataLens AI 🔍📊
 
 DataLens AI is a powerful data analysis and visualization tool powered by the **Google Gemini API**. It allows users to upload datasets (CSV, Excel) and automatically gain insights, interactive charts, and downloadable reports.
@@ -43,5 +39,3 @@ DataLens AI is a powerful data analysis and visualization tool powered by the **
 - **Export**: HTML2Canvas, jsPDF
 - **AI Integration**: `@google/genai`
 
----
-*Created with Google AI Studio*
