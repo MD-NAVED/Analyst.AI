@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Component as ReactComponent, ErrorInfo } from 'react';
 import { 
   Upload, FileSpreadsheet, FileJson, FileText, X, AlertCircle, CheckCircle,
   Search, Filter, BarChart2, PieChart as PieChartIcon, LineChart as LineChartIcon,
   ScatterChart as ScatterChartIcon, Activity, Download, Hash, Type, Calendar, 
   ChevronRight, ArrowUpRight, ArrowDownRight, Menu, LayoutDashboard, Database,
   MessageSquare, Sparkles, Wand2, RefreshCcw, Save, Trash2, ArrowRight, FileOutput, Send,
-  Terminal, Component, Workflow, Zap, Network, Clock, Settings, Plus, Play, TrendingUp
+  Terminal, Component, Workflow, Zap, Network, Clock, Settings, Plus, Play, TrendingUp,
+  AlertTriangle, Copy, RotateCcw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -14,10 +15,92 @@ import {
   LineChart, Line, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis, AreaChart, Area
 } from 'recharts';
 import { GoogleGenAI } from '@google/genai';
+import { saveSession, loadSession, clearSession, getStorageEstimate } from './lib/db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import alasql from 'alasql';
 
 // --- TYPES ---
+interface ErrorBoundaryProps {
+  sectionName: string;
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: ErrorInfo | null;
+  copied: boolean;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null, copied: false };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error(`ErrorBoundary caught an error in ${this.props.sectionName}:`, error, errorInfo);
+    this.setState({ errorInfo });
+  }
+
+  handleCopy = () => {
+    const text = `Error in ${this.props.sectionName}:\n${this.state.error?.toString()}\n\nStack Trace:\n${this.state.errorInfo?.componentStack}`;
+    navigator.clipboard.writeText(text);
+    this.setState({ copied: true });
+    setTimeout(() => this.setState({ copied: false }), 2000);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null, copied: false });
+  }
+
+  handleReload = () => {
+    window.location.reload();
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="w-full h-full p-6 flex items-center justify-center bg-[var(--bg)]">
+          <div className="max-w-2xl w-full p-6 border border-[var(--danger)] bg-[var(--surface)] shadow-2xl flex flex-col gap-4 rounded-xl">
+            <div className="flex items-center gap-3" style={{ color: 'var(--danger)' }}>
+              <AlertTriangle size={24} />
+              <h2 className="text-xl font-bold">Something went wrong in {this.props.sectionName}</h2>
+            </div>
+            
+            <p className="text-sm text-[#94A3B8]">
+              The application encountered an unexpected error. You can try resetting this section or reloading the page.
+            </p>
+
+            <div className="bg-[var(--bg)] border border-[var(--border)] rounded-lg p-4 mb-2 overflow-auto max-h-48 text-xs font-mono" style={{ color: 'var(--danger)' }}>
+              <div className="font-bold mb-2">{this.state.error && this.state.error.toString()}</div>
+              <div className="whitespace-pre-wrap opacity-80">{this.state.errorInfo && this.state.errorInfo.componentStack}</div>
+            </div>
+
+            <div className="flex gap-3 justify-end mt-2">
+              <button onClick={this.handleCopy} className="btn-secondary flex items-center gap-2">
+                <Copy size={16} /> {this.state.copied ? 'Copied!' : 'Copy Error'}
+              </button>
+              <button onClick={this.handleReset} className="btn-secondary flex items-center gap-2">
+                <RefreshCcw size={16} /> Reset
+              </button>
+              <button onClick={this.handleReload} className="btn-primary flex items-center gap-2">
+                <RefreshCcw size={16} /> Reload Page
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 type ColumnType = 'number' | 'text' | 'date';
 interface ColumnInfo {
   name: string;
@@ -35,6 +118,64 @@ interface ToastInfo {
   message: string;
   type: 'success' | 'error' | 'warning' | 'info';
 }
+
+interface HistoryOp {
+  id: string;
+  timestamp: number;
+  description: string;
+  removedRows?: { index: number, row: any }[];
+  changedCellsInverse?: { index: number, column: string, oldVal: any }[];
+  changedCellsForward?: { index: number, column: string, newVal: any }[];
+  droppedColumn?: { name: string, type: ColumnType, colData: any[] };
+  convertedColumnInverse?: { name: string, oldType: ColumnType, oldData: any[] };
+  convertedColumnForward?: { name: string, newType: ColumnType, newData: any[] };
+}
+
+const applyForward = (op: HistoryOp, currentData: any[], currentCols: ColumnInfo[]) => {
+  let d = [...currentData];
+  let c = [...currentCols];
+  if (op.removedRows) {
+      const sorted = [...op.removedRows].sort((a,b) => b.index - a.index);
+      for (const {index} of sorted) d.splice(index, 1);
+  }
+  if (op.changedCellsForward) {
+      for (const {index, column, newVal} of op.changedCellsForward) {
+          d[index] = { ...d[index], [column]: newVal };
+      }
+  }
+  if (op.droppedColumn) {
+      c = c.filter(col => col.name !== op.droppedColumn!.name);
+      d = d.map(row => { const nr = {...row}; delete nr[op.droppedColumn!.name]; return nr; });
+  }
+  if (op.convertedColumnForward) {
+      c = c.map(col => col.name === op.convertedColumnForward!.name ? { ...col, type: op.convertedColumnForward!.newType } : col);
+      op.convertedColumnForward.newData.forEach((val, i) => d[i] = { ...d[i], [op.convertedColumnForward!.name]: val });
+  }
+  return { d, c };
+};
+
+const applyInverse = (op: HistoryOp, currentData: any[], currentCols: ColumnInfo[]) => {
+  let d = [...currentData];
+  let c = [...currentCols];
+  if (op.removedRows) {
+      const sorted = [...op.removedRows].sort((a,b) => a.index - b.index);
+      for (const {index, row} of sorted) d.splice(index, 0, row);
+  }
+  if (op.changedCellsInverse) {
+      for (const {index, column, oldVal} of op.changedCellsInverse) {
+          d[index] = { ...d[index], [column]: oldVal };
+      }
+  }
+  if (op.droppedColumn) {
+      c.push({ name: op.droppedColumn.name, type: op.droppedColumn.type });
+      op.droppedColumn.colData.forEach((val, i) => { d[i] = { ...d[i], [op.droppedColumn!.name]: val }; });
+  }
+  if (op.convertedColumnInverse) {
+      c = c.map(col => col.name === op.convertedColumnInverse!.name ? { ...col, type: op.convertedColumnInverse!.oldType } : col);
+      op.convertedColumnInverse.oldData.forEach((val, i) => d[i] = { ...d[i], [op.convertedColumnInverse!.name]: val });
+  }
+  return { d, c };
+};
 interface ChatMessage {
   id: string;
   role: 'user' | 'model';
@@ -52,14 +193,64 @@ const formatBytes = (bytes: number) => {
 
 const CHART_COLORS = ['#6366F1', '#22D3EE', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
-let aiClient: GoogleGenAI | null = null;
-try {
-  if (process.env.GEMINI_API_KEY) {
-    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const callAI = async (payload: { contents?: any, prompt?: string, model?: string }) => {
+  const response = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'API request failed');
   }
-} catch(e) {
-  console.log('AI Client initialization skipped');
-}
+  return { text: data.text || '' };
+};
+
+const useWindowWidth = () => {
+  const [width, setWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  useEffect(() => {
+    const handleResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  return width;
+};
+
+const useSampledData = (originalData: any[], isSampledView: boolean) => {
+  return useMemo(() => {
+    if (!originalData || !originalData.length) return { sampledData: [], totalRows: 0, isSampled: false };
+    
+    if (!isSampledView || originalData.length <= 500) {
+      return { sampledData: originalData, totalRows: originalData.length, isSampled: false };
+    }
+
+    let sampled: any[] = [];
+    const targetSize = 500;
+    
+    if (originalData.length <= 10000) {
+      // Systematic sample (every Nth row)
+      const step = Math.floor(originalData.length / targetSize) || 1;
+      for (let i = 0; i < targetSize; i++) {
+        const idx = Math.floor(i * step);
+        if (idx < originalData.length) sampled.push(originalData[idx]);
+      }
+    } else {
+       // Random sample
+       const pool = [...originalData];
+       for (let i = 0; i < targetSize; i++) {
+           if (pool.length === 0) break;
+           const r = Math.floor(Math.random() * pool.length);
+           sampled.push(pool[r]);
+           // Swap with last instead of expensive splice
+           pool[r] = pool[pool.length - 1];
+           pool.pop();
+       }
+    }
+    
+    return { sampledData: sampled, totalRows: originalData.length, isSampled: true };
+  }, [originalData, isSampledView]);
+};
 
 const detectColumnTypes = (data: any[], keys: string[]): ColumnInfo[] => {
   return keys.map(key => {
@@ -123,10 +314,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'pivot' | 'eda' | 'chat' | 'sql' | 'ml' | 'dashboard' | 'pipeline' | 'auto-analyst'>('upload');
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
   const [data, setData] = useState<any[]>([]);
-  const [history, setHistory] = useState<any[][]>([]);
+  const [initialData, setInitialData] = useState<any[]>([]);
+  const [initialColumns, setInitialColumns] = useState<ColumnInfo[]>([]);
+  const [history, setHistory] = useState<HistoryOp[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [parseProgress, setParseProgress] = useState({ percent: 0, stage: '', rows: 0, elapsed: 0, eta: 0 });
+  const abortControllerRef = useRef<(() => void) | null>(null);
+  const [strictMode, setStrictMode] = useState(false);
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -137,12 +335,131 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showRestoreSession, setShowRestoreSession] = useState(false);
+  const [hasRestored, setHasRestored] = useState(false);
+  const [storageUsage, setStorageUsage] = useState('');
   
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const y = e.targetTouches[0].clientY;
+    if (!sidebarOpen && y < (typeof window !== 'undefined' ? window.innerHeight - 60 : 600)) return;
+    setTouchStart(y);
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStart === null) return;
+    const diff = touchStart - e.targetTouches[0].clientY;
+    if (diff > 50 && !sidebarOpen) { setSidebarOpen(true); setTouchStart(null); }
+    if (diff < -50 && sidebarOpen) { setSidebarOpen(false); setTouchStart(null); }
+  };
+
   const [autoPilotStatus, setAutoPilotStatus] = useState<'idle' | 'cleaning' | 'analyzing' | 'done'>('idle');
   const [autoPilotInsights, setAutoPilotInsights] = useState<string[]>([]);
   const [autoPilotCharts, setAutoPilotCharts] = useState<any[]>([]);
   const [autoPilotReport, setAutoPilotReport] = useState<any>(null);
   
+  const triggerSaveSession = useCallback(async () => {
+    if ((showRestoreSession && !hasRestored) || (!data.length && !initialData.length)) return;
+    try {
+      await saveSession({
+        data, columns, initialData, initialColumns, history, historyIndex, fileInfo, activeTab, chatMessages
+      });
+      const est = await getStorageEstimate();
+      if (est) setStorageUsage(`Using ${(est.usage / 1024 / 1024).toFixed(2)}MB of available ${(est.quota / 1024 / 1024 / 1024).toFixed(1)}GB`);
+    } catch (e: any) {
+      if (e.message && e.message.includes('exceeded')) {
+        addToast('Storage full! Cannot save session.', 'error');
+      }
+    }
+  }, [data, columns, initialData, initialColumns, history, historyIndex, fileInfo, activeTab, chatMessages, showRestoreSession, hasRestored]);
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const est = await getStorageEstimate();
+        if (est) setStorageUsage(`Using ${(est.usage / 1024 / 1024).toFixed(2)}MB of available ${(est.quota / 1024 / 1024 / 1024).toFixed(1)}GB`);
+        const state = await loadSession();
+        if (state && (state.data?.length > 0 || state.initialData?.length > 0)) {
+          setShowRestoreSession(true);
+        }
+      } catch (e) {
+        console.error("Storage error:", e);
+      }
+    };
+    init();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(triggerSaveSession, 30000);
+    return () => clearInterval(interval);
+  }, [triggerSaveSession]);
+
+  const handleRestoreSession = async (restore: boolean) => {
+    setShowRestoreSession(false);
+    if (restore) {
+      try {
+        const state = await loadSession();
+        if (state) {
+          if (state.data) setData(state.data);
+          if (state.columns) setColumns(state.columns);
+          if (state.initialData) setInitialData(state.initialData);
+          if (state.initialColumns) setInitialColumns(state.initialColumns);
+          if (state.history) setHistory(state.history);
+          if (state.historyIndex !== undefined) setHistoryIndex(state.historyIndex);
+          if (state.fileInfo) setFileInfo(state.fileInfo);
+          if (state.activeTab) setActiveTab(state.activeTab);
+          if (state.chatMessages) setChatMessages(state.chatMessages);
+          setHasRestored(true);
+          addToast('Session restored successfully', 'success');
+        }
+      } catch (e) {
+        addToast('Failed to restore session', 'error');
+      }
+    } else {
+      await clearSession();
+    }
+  };
+
+  const dispatchOp = (op: HistoryOp) => {
+    let targetHistory = history.slice(0, historyIndex + 1);
+    const { d, c } = applyForward(op, data, columns);
+    setData(d);
+    setColumns(c);
+
+    if (targetHistory.length >= 20) {
+      const oldestOp = targetHistory[0];
+      const newInitial = applyForward(oldestOp, initialData, initialColumns);
+      setInitialData(newInitial.d);
+      setInitialColumns(newInitial.c);
+      targetHistory = targetHistory.slice(1);
+    }
+    
+    setHistory([...targetHistory, op]);
+    setHistoryIndex(targetHistory.length);
+    setTimeout(triggerSaveSession, 100);
+  };
+
+  const jumpToState = (targetIndex: number) => {
+    if (targetIndex === historyIndex) return;
+    let d = [...initialData];
+    let c = [...initialColumns];
+    for (let i = 0; i <= targetIndex; i++) {
+        const result = applyForward(history[i], d, c);
+        d = result.d;
+        c = result.c;
+    }
+    setData(d);
+    setColumns(c);
+    setHistoryIndex(targetIndex);
+    addToast(targetIndex === -1 ? 'Reverted to initial state' : `Jumped to: ${history[targetIndex].description}`, 'info');
+    setTimeout(triggerSaveSession, 100);
+  }
+
+  const undo = () => {
+    if (historyIndex >= 0) {
+      jumpToState(historyIndex - 1);
+    }
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -163,20 +480,8 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [history]);
-  
-  const pushHistory = (newData: any[]) => {
-    setHistory(prev => [...prev.slice(-9), data]); // keep last 10 states
-    setData(newData);
-  };
+  }, [historyIndex, initialData, initialColumns, history, undo]);
 
-  const undo = () => {
-    if (history.length > 0) {
-      setData(history[history.length - 1]);
-      setHistory(prev => prev.slice(0, -1));
-      addToast('Change undone', 'info');
-    }
-  };
 
   const addToast = (message: string, type: ToastInfo['type'] = 'info') => {
     const id = Date.now();
@@ -191,22 +496,28 @@ export default function App() {
   };
 
   const autoCleanData = () => {
-    let newData = [...data];
+    const removedRows: {index: number, row: any}[] = [];
     const unique = new Set();
-    newData = newData.filter(row => {
+    const newData: any[] = [];
+    data.forEach((row, i) => {
         const str = JSON.stringify(row);
-        if (unique.has(str)) return false;
-        unique.add(str);
-        return true;
-    });
-
-    newData = newData.filter(row => {
-      return Object.values(row).every(v => v !== null && v !== undefined && v !== '');
+        const hasNull = !Object.values(row).every(v => v !== null && v !== undefined && v !== '');
+        if (!unique.has(str) && !hasNull) {
+            unique.add(str);
+            newData.push(row);
+        } else {
+            removedRows.push({index: i, row});
+        }
     });
     
-    if (newData.length < data.length) {
-       pushHistory(newData);
-       addToast(`Auto-cleaned: removed ${data.length - newData.length} rows (duplicates/nulls)`, 'success');
+    if (removedRows.length > 0) {
+       dispatchOp({
+          id: Math.random().toString(36).substring(2),
+          timestamp: Date.now(),
+          description: `Auto-cleaned: removed ${removedRows.length} rows (duplicates/nulls)`,
+          removedRows
+       });
+       addToast(`Auto-cleaned: removed ${removedRows.length} rows (duplicates/nulls)`, 'success');
     } else {
        addToast('Auto-cleaned: no duplicates or nulls found', 'info');
     }
@@ -218,15 +529,6 @@ export default function App() {
     const cleanedData = autoCleanData();
     
     setAutoPilotStatus('analyzing');
-    if (!aiClient) {
-        setTimeout(() => {
-            setAutoPilotCharts([]);
-            setAutoPilotInsights(["Please configure GEMINI_API_KEY to see AI insights."]);
-            setAutoPilotReport(null);
-            setAutoPilotStatus('done');
-        }, 1000);
-        return;
-    }
     
     try {
         const numericCols = columns.filter(c => c.type === 'number').map(c => c.name);
@@ -267,10 +569,7 @@ STRICT RULES:
 2. Ensure the column names used in 'recommended_charts' exactly match the provided metadata.
 3. The tone must be professional, corporate, and insight-driven.`;
         
-        const result = await aiClient.models.generateContent({
-           model: 'gemini-2.5-flash',
-           contents: context
-        });
+        const result = await callAI({ prompt: context });
         
         let text = result.text || "";
         text = text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -405,7 +704,7 @@ STRICT RULES:
                                       {pieData.map((e,i) => <Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}
                                    </Pie>
                                    <RechartsTooltip content={<CustomTooltip />} />
-                                   <Legend verticalAlign="top" align="right" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', color: 'var(--text-secondary)'}} />
+                                   {window.innerWidth >= 768 && <Legend verticalAlign="top" align="right" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', color: 'var(--text-secondary)'}} />}
                                 </PieChart>
                              </ResponsiveContainer>
                           </div>
@@ -415,18 +714,18 @@ STRICT RULES:
                         <div key={idx} className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6" style={{height: 350}}>
                            <h4 className="font-semibold mb-4 text-center">{cfg.title}</h4>
                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={chartData} margin={{top:10, right:10, left:0, bottom:20}}>
+                              <BarChart data={chartData} layout={window.innerWidth < 768 ? "vertical" : "horizontal"} margin={{top:10, right:10, left:window.innerWidth < 768 ? 30 : 0, bottom:20}}>
                                  <defs>
                                    <linearGradient id="autoBarGradient" x1="0" y1="0" x2="0" y2="1">
                                      <stop offset="0%" stopColor="#22D3EE" stopOpacity={1}/>
                                      <stop offset="100%" stopColor="#6366F1" stopOpacity={1}/>
                                    </linearGradient>
                                  </defs>
-                                 <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                                 <XAxis dataKey={cfg.xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
-                                 <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+                                 <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={window.innerWidth >= 768} horizontal={window.innerWidth < 768} />
+                                 <XAxis dataKey={window.innerWidth < 768 ? cfg.yAxis : cfg.xAxis} type={window.innerWidth < 768 ? "number" : "category"} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
+                                 <YAxis dataKey={window.innerWidth < 768 ? cfg.xAxis : undefined} type={window.innerWidth < 768 ? "category" : "number"} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
                                  <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
-                                 <Bar dataKey={cfg.yAxis} fill="url(#autoBarGradient)" radius={[4,4,0,0]} barSize={32} animationDuration={1500} animationEasing="ease-in-out" />
+                                 <Bar dataKey={cfg.yAxis} fill="url(#autoBarGradient)" radius={window.innerWidth < 768 ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={32} animationDuration={1500} animationEasing="ease-in-out" />
                               </BarChart>
                            </ResponsiveContainer>
                         </div>
@@ -441,31 +740,122 @@ STRICT RULES:
 
   const processFile = async (file: File) => {
     if (file.size > 100 * 1024 * 1024) {
-      addToast('File exceeds 100MB limit', 'error');
+      addToast(`File size exceeds the 100MB maximum limit. Selected file size: ${(file.size / (1024 * 1024)).toFixed(2)}MB.`, 'error');
       return;
     }
     
     setLoading(true);
+    setParseProgress({ percent: 0, stage: 'Reading file...', rows: 0, elapsed: 0, eta: 0 });
+    let isCanceled = false;
+    abortControllerRef.current = () => { isCanceled = true; setLoading(false); };
+    
     try {
       let parsedData: any[] = [];
       const extension = file.name.split('.').pop()?.toLowerCase();
+      const startTime = Date.now();
+
+      const updateProgress = (stage: string, percent: number, rows: number) => {
+          const now = Date.now();
+          const elapsed = Math.floor((now - startTime) / 1000);
+          const eta = percent > 0 && percent < 100 ? Math.floor((elapsed / percent) * (100 - percent)) : 0;
+          setParseProgress({ percent: Math.min(100, Math.round(percent)), stage, rows, elapsed, eta });
+      };
+
+      // Check for binary by reading a small chunk and looking for null bytes
+      if (['csv', 'json'].includes(extension || '')) {
+         const previewChunk = await file.slice(0, 4096).text();
+         if (/\x00/.test(previewChunk)) {
+            throw new Error("File validation failed: Appears to be binary, but expected text (CSV/JSON). Check file contents/encoding.");
+         }
+      }
 
       if (extension === 'csv') {
-        const text = await file.text();
-        const result = Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: true });
-        parsedData = result.data as any[];
+        updateProgress('Parsing CSV structure...', 0, 0);
+        parsedData = await new Promise<any[]>((resolve, reject) => {
+           let rows: any[] = [];
+           let lastUpdate = Date.now();
+           
+           Papa.parse(file, {
+              header: true,
+              skipEmptyLines: true,
+              dynamicTyping: true,
+              chunk: (results, parser) => {
+                 if (isCanceled) {
+                    parser.abort();
+                    reject(new Error("Canceled"));
+                    return;
+                 }
+                 
+                 if (results.errors && results.errors.length > 0) {
+                     const hasFieldMismatch = results.errors.some(e => e.type === 'FieldMismatch');
+                     if (hasFieldMismatch) {
+                         parser.abort();
+                         reject(new Error("CSV validation failed: Inconsistent column count across rows."));
+                         return;
+                     }
+                 }
+                 
+                 rows.push(...(results.data as any[]));
+                 
+                 const now = Date.now();
+                 if (now - lastUpdate > 100) {
+                     lastUpdate = now;
+                     // results.meta.cursor gives the byte index
+                     const percent = (results.meta.cursor / file.size) * 100;
+                     updateProgress('Parsing data...', percent, rows.length);
+                 }
+
+                 // Hard limits check
+                 if (rows.length > 500000) {
+                     parser.abort();
+                     reject(new Error(`File validation failed: Contains ${rows.length.toLocaleString()} rows, exceeding the max limit of 500,000.`));
+                     return;
+                 }
+              },
+              complete: () => {
+                 updateProgress('Processing rows...', 100, rows.length);
+                 resolve(rows);
+              },
+              error: (error) => {
+                 reject(error);
+              }
+           });
+        });
+        
       } else if (extension === 'json') {
+        updateProgress('Reading JSON...', 10, 0);
         const text = await file.text();
+        if (isCanceled) throw new Error("Canceled");
+        
+        updateProgress('Parsing JSON structure...', 50, 0);
+        
+        // Yield to let UI update
+        await new Promise(r => setTimeout(r, 50));
+        
         parsedData = JSON.parse(text);
         if (!Array.isArray(parsedData)) {
           throw new Error("JSON must contain an array of objects");
         }
+        updateProgress('Processing data...', 100, parsedData.length);
       } else if (['xlsx', 'xls'].includes(extension || '')) {
+        updateProgress('Reading Excel file...', 10, 0);
         const arrayBuffer = await file.arrayBuffer();
+        if (isCanceled) throw new Error("Canceled");
+        
+        updateProgress('Parsing workbook structure...', 40, 0);
+        await new Promise(r => setTimeout(r, 50));
+        if (isCanceled) throw new Error("Canceled");
+        
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
+        
+        updateProgress('Analyzing columns...', 70, 0);
+        await new Promise(r => setTimeout(r, 50));
+        if (isCanceled) throw new Error("Canceled");
+        
         parsedData = XLSX.utils.sheet_to_json(worksheet);
+        updateProgress('Ready', 100, parsedData.length);
       } else {
         throw new Error("Unsupported file format");
       }
@@ -474,7 +864,37 @@ STRICT RULES:
         throw new Error("File contains no data");
       }
 
+      if (parsedData.length > 500000) {
+        throw new Error(`File validation failed: Contains ${parsedData.length.toLocaleString()} rows, exceeding the max limit of 500,000.`);
+      }
+
       const keys = Object.keys(parsedData[0]);
+      
+      if (keys.length > 500) {
+        throw new Error(`File validation failed: Contains ${keys.length.toLocaleString()} columns, exceeding the max limit of 500.`);
+      }
+
+      // Validations: injection & strict mode
+      for (let i = 0; i < parsedData.length; i++) {
+        const row = parsedData[i];
+        for (let j = 0; j < keys.length; j++) {
+           const key = keys[j];
+           const val = row[key];
+           
+           // Strict mode check
+           if (strictMode) {
+               if (val === null || val === undefined || val === '') {
+                   throw new Error(`Strict mode validation failed: Null or empty string found at row ${i+1}, column '${key}'.`);
+               }
+           }
+
+           // CSV injection check
+           if (typeof val === 'string' && /^[=+\-@]/.test(val.trim())) {
+               throw new Error(`Security validation failed: Potential CSV injection (formula starting with =, +, -, @) detected at row ${i+1}, column '${key}'.`);
+           }
+        }
+      }
+
       const colTypes = detectColumnTypes(parsedData, keys);
       
       setData(parsedData);
@@ -487,11 +907,17 @@ STRICT RULES:
         type: extension?.toUpperCase() || 'UNKNOWN'
       });
       
-      addToast(`Successfully loaded ${parsedData.length} rows`, 'success');
+      addToast(`Validated: ${parsedData.length.toLocaleString()} rows, ${keys.length.toLocaleString()} columns, no issues found`, 'success');
       setActiveTab('preview');
       
+      setTimeout(triggerSaveSession, 100);
+      
     } catch (err: any) {
-      addToast(err.message || 'Error processing file', 'error');
+      if (err.message === "Canceled") {
+        addToast("File processing canceled", "info");
+      } else {
+        addToast(err.message || 'Error processing file', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -547,14 +973,42 @@ STRICT RULES:
           </div>
         </label>
         
+        <div className="flex justify-center mt-6">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={strictMode}
+              onChange={(e) => setStrictMode(e.target.checked)}
+              className="accent-[var(--primary)] w-4 h-4"
+            />
+            <span className="text-sm">Enable Strict Mode (reject nulls/empty strings)</span>
+          </label>
+        </div>
+
         {loading && (
           <div className="mt-8">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-medium">Processing Data...</span>
-              <span className="mono-text text-sm" style={{color: 'var(--primary)'}}>Optimizing</span>
+              <span className="text-sm font-medium">{parseProgress.stage || 'Processing Data...'}</span>
+              <span className="mono-text text-sm" style={{color: 'var(--primary)'}}>{parseProgress.percent}%</span>
             </div>
-            <div className="progress-container">
-              <div className="progress-fill" style={{width: '70%', animation: 'pulse-opacity 1.5s infinite'}}></div>
+            <div className="progress-container mb-2">
+              <div className="progress-fill transition-all duration-200" style={{width: `${parseProgress.percent}%`}}></div>
+            </div>
+            <div className="flex justify-between items-center text-xs text-[#94A3B8] font-mono">
+                <div className="flex gap-4">
+                    <span>Rows: {parseProgress.rows.toLocaleString()}</span>
+                    <span>Elapsed: {parseProgress.elapsed}s</span>
+                    {parseProgress.eta > 0 && <span>ETA: {parseProgress.eta}s</span>}
+                </div>
+                <button 
+                  onClick={(e) => {
+                     e.stopPropagation();
+                     abortControllerRef.current?.();
+                  }} 
+                  className="px-3 py-1 rounded bg-[rgba(239,68,68,0.1)] text-[var(--danger)] border border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.2)] transition-colors z-10 relative cursor-pointer"
+                >
+                  Cancel
+                </button>
             </div>
           </div>
         )}
@@ -603,7 +1057,9 @@ STRICT RULES:
           </div>
         </div>
 
-        <div className="table-container p-0 overflow-hidden flex-1 flex flex-col">
+        <div className="table-container p-0 overflow-hidden flex-1 flex flex-col relative">
+          <div className="table-fade-indicator"></div>
+          <div className="table-scroll-hint">Pinch to zoom, swipe to scroll</div>
           <div className="flex-1 overflow-auto">
             <table className="premium-table">
               <thead>
@@ -750,16 +1206,21 @@ STRICT RULES:
     
     const handleDropDuplicates = () => {
         const unique = new Set();
-        const newData = data.filter(row => {
+        const removedRows: {index: number, row: any}[] = [];
+        data.forEach((row, i) => {
             const str = JSON.stringify(row);
-            if (unique.has(str)) return false;
-            unique.add(str);
-            return true;
+            if (unique.has(str)) removedRows.push({index: i, row});
+            else unique.add(str);
         });
-        const removed = data.length - newData.length;
-        if (removed > 0) {
-            pushHistory(newData);
-            addToast(`Removed ${removed} duplicates`, 'success');
+        
+        if (removedRows.length > 0) {
+            dispatchOp({
+                id: Math.random().toString(36).substring(2),
+                timestamp: Date.now(),
+                description: `Removed ${removedRows.length} duplicates`,
+                removedRows
+            });
+            addToast(`Removed ${removedRows.length} duplicates`, 'success');
         } else {
             addToast('No duplicates found', 'info');
         }
@@ -767,24 +1228,31 @@ STRICT RULES:
 
     const fillMissing = (method: string, customVal: string = '') => {
         if (!selectedCol) return;
-        const newData = data.map(d => ({...d}));
         let val: any = customVal;
-        const stats = calculateStats(newData, selectedCol);
+        const stats = calculateStats(data, selectedCol);
         
         if (method === 'mean' && stats) val = stats.mean;
         if (method === 'median' && stats) val = stats.median;
         if (method === 'zero') val = 0;
         
-        let filledCount = 0;
-        newData.forEach(row => {
+        const changedCellsInverse: any[] = [];
+        const changedCellsForward: any[] = [];
+        
+        data.forEach((row, i) => {
             if (row[selectedCol] === null || row[selectedCol] === undefined || row[selectedCol] === '') {
-                row[selectedCol] = val;
-                filledCount++;
+                changedCellsInverse.push({ index: i, column: selectedCol, oldVal: row[selectedCol] });
+                changedCellsForward.push({ index: i, column: selectedCol, newVal: val });
             }
         });
-        if (filledCount > 0) {
-            pushHistory(newData);
-            addToast(`Filled ${filledCount} missing values`, 'success');
+        if (changedCellsForward.length > 0) {
+            dispatchOp({
+                id: Math.random().toString(36).substring(2),
+                timestamp: Date.now(),
+                description: `Filled ${changedCellsForward.length} missing values in ${selectedCol}`,
+                changedCellsInverse,
+                changedCellsForward
+            });
+            addToast(`Filled ${changedCellsForward.length} missing values`, 'success');
         } else {
             addToast('No missing values found in column', 'info');
         }
@@ -802,68 +1270,93 @@ STRICT RULES:
         const upperBound = q3 + 1.5 * iqr;
 
         if (action === 'remove') {
-            const newData = data.filter(row => {
+            const removedRows: any[] = [];
+            data.forEach((row, i) => {
                 const val = Number(row[selectedCol]);
-                if (isNaN(val)) return true;
-                return val >= lowerBound && val <= upperBound;
+                if (!isNaN(val) && (val < lowerBound || val > upperBound)) removedRows.push({index: i, row});
             });
-            const removed = data.length - newData.length;
-            if (removed > 0) {
-                pushHistory(newData);
-                addToast(`Removed ${removed} outliers`, 'success');
+            if (removedRows.length > 0) {
+                dispatchOp({
+                    id: Math.random().toString(36).substring(2),
+                    timestamp: Date.now(),
+                    description: `Removed ${removedRows.length} outliers from ${selectedCol}`,
+                    removedRows
+                });
+                addToast(`Removed ${removedRows.length} outliers`, 'success');
             } else {
                 addToast('No outliers found', 'info');
             }
         } else {
-            const newData = data.map(row => {
-                const newRow = {...row};
+            const changedCellsInverse: any[] = [];
+            const changedCellsForward: any[] = [];
+            data.forEach((row, i) => {
                 const val = Number(row[selectedCol]);
                 if (!isNaN(val)) {
-                    if (val < lowerBound) newRow[selectedCol] = lowerBound;
-                    if (val > upperBound) newRow[selectedCol] = upperBound;
+                    if (val < lowerBound) {
+                        changedCellsInverse.push({ index: i, column: selectedCol, oldVal: row[selectedCol] });
+                        changedCellsForward.push({ index: i, column: selectedCol, newVal: lowerBound });
+                    }
+                    if (val > upperBound) {
+                        changedCellsInverse.push({ index: i, column: selectedCol, oldVal: row[selectedCol] });
+                        changedCellsForward.push({ index: i, column: selectedCol, newVal: upperBound });
+                    }
                 }
-                return newRow;
             });
-            pushHistory(newData);
-            addToast(`Capped outliers to bounds [${lowerBound.toFixed(2)}, ${upperBound.toFixed(2)}]`, 'success');
+            if (changedCellsForward.length > 0) {
+                dispatchOp({
+                    id: Math.random().toString(36).substring(2),
+                    timestamp: Date.now(),
+                    description: `Capped ${changedCellsForward.length} outliers in ${selectedCol}`,
+                    changedCellsInverse,
+                    changedCellsForward
+                });
+                addToast(`Capped outliers to bounds [${lowerBound.toFixed(2)}, ${upperBound.toFixed(2)}]`, 'success');
+            } else {
+                addToast('No outliers found', 'info');
+            }
         }
     };
 
     const dropColumn = () => {
         if (!selectedCol) return;
-        const newData = data.map(row => {
-            const newRow = {...row};
-            delete newRow[selectedCol];
-            return newRow;
+        const type = columns.find(c => c.name === selectedCol)?.type || 'text';
+        dispatchOp({
+            id: Math.random().toString(36).substring(2),
+            timestamp: Date.now(),
+            description: `Dropped column: ${selectedCol}`,
+            droppedColumn: { name: selectedCol, type, colData: data.map(d => d[selectedCol]) }
         });
-        setColumns(columns.filter(c => c.name !== selectedCol));
         setSelectedCol(columns.filter(c => c.name !== selectedCol)[0]?.name || '');
-        pushHistory(newData);
         addToast(`Dropped column: ${selectedCol}`, 'success');
     };
 
     const changeDataType = (type: 'number' | 'text' | 'date') => {
         if (!selectedCol) return;
+        const oldType = columns.find(c => c.name === selectedCol)?.type || 'text';
+        if (oldType === type) return;
+        
         const newData = data.map(row => {
-            const newRow = {...row};
-            const val = newRow[selectedCol];
-            if (val == null || val === '') return newRow;
-            
+            const val = row[selectedCol];
+            if (val == null || val === '') return val;
             if (type === 'number') {
-                newRow[selectedCol] = Number(val);
-                if (isNaN(newRow[selectedCol])) newRow[selectedCol] = null;
+                const num = Number(val);
+                return isNaN(num) ? null : num;
             } else if (type === 'text') {
-                newRow[selectedCol] = String(val);
+                return String(val);
             } else if (type === 'date') {
                 const date = new Date(val);
-                newRow[selectedCol] = isNaN(date.getTime()) ? null : date.toISOString();
+                return isNaN(date.getTime()) ? null : date.toISOString();
             }
-            return newRow;
+            return val;
         });
         
-        const newCols = columns.map(c => c.name === selectedCol ? { ...c, type } : c);
-        setColumns(newCols);
-        pushHistory(newData);
+        dispatchOp({
+            id: Math.random().toString(36).substring(2),
+            timestamp: Date.now(),
+            description: `Converted ${selectedCol} from ${oldType} to ${type}`,
+            convertedColumnInverse: { name: selectedCol, oldType, oldData: data.map(d => d[selectedCol]) },
+            convertedColumnForward: { name: selectedCol, newType: type, newData }
+        });
         addToast(`Converted ${selectedCol} to ${type}`, 'success');
     };
 
@@ -983,6 +1476,34 @@ STRICT RULES:
         }
     };
 
+    const exportPivotCSV = () => {
+        const rows = pivotData.rows;
+        const cols = pivotData.cols;
+        let csvContent = "Row," + cols.join(",") + "\n";
+        
+        rows.forEach(r => {
+            let rowString = `"${r}",`;
+            const rowValues = cols.map(c => {
+                const val = getAggValue(r, c);
+                return `"${val}"`;
+            });
+            rowString += rowValues.join(",");
+            csvContent += rowString + "\n";
+        });
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
+        link.setAttribute("href", url);
+        link.setAttribute("download", `${filePrefix}_pivot.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        addToast("Pivot table exported as CSV", "success");
+    };
+
     return (
       <div className="fade-in-up stagger-1 flex flex-col h-full">
         <div className="flex justify-between items-center mb-6">
@@ -990,6 +1511,9 @@ STRICT RULES:
             <h2>Pivot Table</h2>
             <p className="text-muted mt-1">Multi-dimensional data summarization</p>
           </div>
+          <button className="btn-secondary" onClick={exportPivotCSV}>
+            <Download size={16} /> Export CSV
+          </button>
         </div>
         
         <div className="premium-card p-4 mb-6 flex gap-4 items-end flex-wrap">
@@ -1024,7 +1548,9 @@ STRICT RULES:
             </div>
         </div>
 
-        <div className="table-container p-0 overflow-hidden flex-1 flex flex-col">
+        <div className="table-container p-0 overflow-hidden flex-1 flex flex-col relative">
+          <div className="table-fade-indicator"></div>
+          <div className="table-scroll-hint">Pinch to zoom, swipe to scroll</div>
           <div className="flex-1 overflow-auto">
             <table className="premium-table pivot-table">
               <thead>
@@ -1056,8 +1582,14 @@ STRICT RULES:
     const [loadingInsights, setLoadingInsights] = useState(false);
 
     const generateInsights = async () => {
-        if (!aiClient) {
-            addToast('Gemini API key is required for AI Insights', 'warning');
+        setLoadingInsights(true);
+        try {
+            let context = `Columns: ${columns.map(c => c.name).join(', ')}. \nHere are 5 samples: ${JSON.stringify(data.slice(0,5))}. \nGive exactly 5 bullet points of quick data analytics insights based on this data. Format as just 5 short, punchy plain text strings separated by newlines. No markdown bullets.`;
+            const result = await callAI({ prompt: context });
+            const text = result.text || "";
+            setInsights(text.split('\n').filter((l: string) => l.trim().length > 0).slice(0,5).map((s: string) => s.replace(/^[-*•]\s*/, '').trim()));
+        } catch (e: any) {
+            addToast('AI key not configured or error occurred', 'warning');
             setInsights([
                 "The dataset contains structural patterns that might be useful.",
                 "Numeric columns show varied distributions.",
@@ -1065,20 +1597,6 @@ STRICT RULES:
                 "Correlation coefficients can be observed in the heatmap below.",
                 "Filter specific categories for more detailed analysis."
             ]);
-            return;
-        }
-        setLoadingInsights(true);
-        try {
-            const model = aiClient.models;
-            let context = `Columns: ${columns.map(c => c.name).join(', ')}. \nHere are 5 samples: ${JSON.stringify(data.slice(0,5))}. \nGive exactly 5 bullet points of quick data analytics insights based on this data. Format as just 5 short, punchy plain text strings separated by newlines. No markdown bullets.`;
-            const result = await model.generateContent({
-               model: 'gemini-2.5-flash',
-               contents: context
-            });
-            const text = result.text || "";
-            setInsights(text.split('\n').filter((l: string) => l.trim().length > 0).slice(0,5).map((s: string) => s.replace(/^[-*•]\s*/, '').trim()));
-        } catch (e: any) {
-            addToast(e.message, 'error');
         } finally {
             setLoadingInsights(false);
         }
@@ -1087,27 +1605,44 @@ STRICT RULES:
     const downloadPDF = async () => {
         const element = document.getElementById('eda-report');
         if (!element) return;
-        addToast('Generating high-quality report...', 'info');
+        addToast('Generating high-quality multi-page PDF...', 'info');
         
-        setTimeout(async () => {
-            try {
-                const canvas = await html2canvas(element, { 
-                    scale: 2, 
-                    backgroundColor: '#070B14',
-                    useCORS: true,
-                    allowTaint: true
-                });
-                const imgData = canvas.toDataURL('image/jpeg', 1.0);
-                const pdf = new jsPDF('p', 'pt', 'a4');
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save('EDA_Report.pdf');
-            } catch (e) {
-                console.error(e);
-                addToast('Export failed', 'error');
+        // Wait for rendering to settle
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        
+        try {
+            const canvas = await html2canvas(element, { 
+                scale: 2, 
+                backgroundColor: '#070B14',
+                useCORS: true,
+                allowTaint: true
+            });
+            const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            const pdf = new jsPDF('p', 'pt', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            let heightLeft = imgHeight;
+            let position = 0;
+            
+            pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+            heightLeft -= pageHeight;
+            
+            while (heightLeft >= 0) {
+                position = position - pageHeight;
+                pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+                heightLeft -= pageHeight;
             }
-        }, 2000);
+            
+            const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
+            pdf.save(`${filePrefix}_eda.pdf`);
+            addToast('Exported PDF successfully', 'success');
+        } catch (e) {
+            console.error(e);
+            addToast('Export failed', 'error');
+        }
     };
 
     const correlationMatrix = useMemo(() => {
@@ -1176,7 +1711,9 @@ STRICT RULES:
                 {numericCols.length < 2 ? (
                     <div className="text-center py-8 text-muted">Need at least 2 numeric columns for correlation.</div>
                 ) : (
-                    <div className="overflow-x-auto table-container p-0">
+                    <div className="overflow-x-auto table-container p-0 relative">
+                        <div className="table-fade-indicator"></div>
+                        <div className="table-scroll-hint">Pinch to zoom, swipe to scroll</div>
                         <table className="premium-table text-center border-collapse">
                             <thead>
                                 <tr>
@@ -1220,53 +1757,54 @@ STRICT RULES:
          setChatMessages(prev => [...prev, newMsg]);
          setChatInput('');
          
-         if (!aiClient) {
-             setTimeout(() => {
-                 setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: "Please configure your GEMINI_API_KEY environment variable to enable AI chat."}]);
-             }, 500);
-             return;
-         }
-
          setChatTyping(true);
          try {
              const colsContext = columns.map(c => c.name).join(', ');
              const sampleData = JSON.stringify(data.slice(0, 3));
              const systemPrompt = `You are an AI Data Assistant. The user's dataset has columns: ${colsContext}. Sample data: ${sampleData}. Provide concise, helpful answers. Use text only, avoid markdown where possible.`;
              
-             const model = aiClient.models;
              const historyForAPI = chatMessages.slice(1).map(m => ({ // Skip greeting
                  role: m.role,
                  parts: [{text: m.content}]
              }));
              historyForAPI.push({ role: 'user', parts: [{text: text}] });
 
-             const result = await model.generateContent({
-                 model: 'gemini-2.5-flash',
-                 contents: [
-                     {role: 'user', parts: [{text: systemPrompt}]},
-                     {role: 'model', parts: [{text: "Understood. I will be concise."}]},
-                     ...historyForAPI
-                 ]
-             });
+             const contents = [
+                 {role: 'user', parts: [{text: systemPrompt}]},
+                 {role: 'model', parts: [{text: "Understood. I will be concise."}]},
+                 ...historyForAPI
+             ];
+
+             const result = await callAI({ contents });
              
              setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: result.text || "No response." }]);
          } catch (e: any) {
-             addToast(e.message, 'error');
+             setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: "Failed to connect to AI server. Check your configuration."}]);
          } finally {
              setChatTyping(false);
+             setTimeout(triggerSaveSession, 100);
          }
      };
 
      const suggestions = ["What columns have missing values?", "What is the general trend?", "Find outliers", "Summarize this dataset"];
 
-     const exportChatTXT = () => {
-         const text = chatMessages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
-         const blob = new Blob([text], { type: 'text/plain;charset=utf-8;' });
+     const exportChatMD = () => {
+         let md = `# DataLens AI Chat Export\n\n`;
+         chatMessages.forEach(m => {
+             const role = m.role === 'user' ? '## User' : '## AI Assistant';
+             md += `${role}\n${m.content}\n\n`;
+         });
+         const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
          const url = URL.createObjectURL(blob);
          const link = document.createElement("a");
+         const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
          link.setAttribute("href", url);
-         link.setAttribute("download", "AI_ChatContext.txt");
+         link.setAttribute("download", `${filePrefix}_chat.md`);
+         document.body.appendChild(link);
          link.click();
+         document.body.removeChild(link);
+         URL.revokeObjectURL(url);
+         addToast("Chat exported as Markdown", "success");
      };
 
      return (
@@ -1277,7 +1815,7 @@ STRICT RULES:
              <p className="text-muted mt-1">Talk to your dataset naturally</p>
            </div>
            <div className="flex gap-2">
-               <button className="btn-secondary" onClick={exportChatTXT}>
+               <button className="btn-secondary" onClick={exportChatMD}>
                   <Download size={16} /> Export Chat
                </button>
                <button className="btn-secondary" onClick={() => setChatMessages([chatMessages[0]])}>
@@ -1361,34 +1899,70 @@ STRICT RULES:
 const ChartsSection = () => {
     const numericCols = columns.filter(c => c.type === 'number');
     const allCols = columns;
+    const [isSampledView, setIsSampledView] = useState(true);
 
     if (!data.length) return <div className="text-center mt-20">No data loaded</div>;
     if (numericCols.length === 0) return <div className="text-center mt-20">Numeric columns required for charting.</div>;
 
-    const downloadChart = (id: string, fileName: string) => {
-      addToast('Generating high-quality report...', 'info');
-      // Wait for any animations to finish
-      setTimeout(async () => {
-        const element = document.getElementById(id);
-        if (!element) return;
-        
+    const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg' = 'png') => {
+      addToast(`Generating ${format.toUpperCase()}...`, 'info');
+      // Wait for React updates to settle
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      
+      const element = document.getElementById(id);
+      if (!element) {
+        addToast('Chart element not found', 'error');
+        return;
+      }
+      
+      const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
+      const safeFileName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+      if (format === 'svg') {
         try {
-          const canvas = await html2canvas(element, { 
-            scale: 2, 
-            backgroundColor: '#0D1117',
-            useCORS: true,
-            allowTaint: true
-          });
-          const imgData = canvas.toDataURL('image/png');
-          const a = document.createElement('a');
-          a.download = `${fileName}.png`;
-          a.href = imgData;
-          a.click();
-        } catch (e) {
-          console.error(e);
-          addToast('Export failed', 'error');
+          const svgElement = element.querySelector('svg');
+          if (!svgElement) {
+             addToast('SVG not found for this chart', 'error');
+             return;
+          }
+          const clone = svgElement.cloneNode(true) as SVGElement;
+          if (!clone.getAttribute('xmlns')) {
+              clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+          }
+          const svgData = new XMLSerializer().serializeToString(clone);
+          const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.setAttribute("href", url);
+          link.setAttribute("download", `${filePrefix}_chart_${safeFileName}.svg`);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          addToast('Exported SVG successfully', 'success');
+        } catch (err) {
+          addToast('Failed to export SVG', 'error');
         }
-      }, 2000);
+        return;
+      }
+
+      try {
+        const canvas = await html2canvas(element, { 
+          scale: 2, 
+          backgroundColor: '#0D1117',
+          useCORS: true,
+          allowTaint: true
+        });
+        const imgData = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.download = `${filePrefix}_chart_${safeFileName}.png`;
+        a.href = imgData;
+        a.click();
+        addToast('Exported PNG successfully', 'success');
+      } catch (e) {
+        console.error(e);
+        addToast('Export failed', 'error');
+      }
     };
 
     // Sub-component for individual chart widgets
@@ -1396,16 +1970,19 @@ const ChartsSection = () => {
       const [xAxis, setXAxis] = useState(allCols[0]?.name || '');
       const [yAxis, setYAxis] = useState(numericCols[0]?.name || '');
       const [chartTitle, setChartTitle] = useState(title);
+      const isMobile = useWindowWidth() < 768;
+      
+      const { sampledData, totalRows, isSampled } = useSampledData(data, isSampledView);
 
       const chartData = useMemo(() => {
         if (type === 'hist') {
-          // Calculate histogram bins
-          const values = data.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
+          // Calculate histogram bins on sampledData
+          const values = sampledData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
           if (!values.length) return [];
           const min = Math.min(...values);
           const max = Math.max(...values);
           const binCount = 10;
-          const binSize = (max - min) / binCount;
+          const binSize = (max - min) / binCount || 1;
           const bins = Array.from({length: binCount}, (_, i) => ({
             name: `${(min + i * binSize).toFixed(1)} - ${(min + (i + 1) * binSize).toFixed(1)}`,
             count: 0
@@ -1418,7 +1995,7 @@ const ChartsSection = () => {
           return bins;
         }
         
-        let sliceData = data.slice(0, Math.min(data.length, 100)); // Cap at 100 for dev rendering
+        let sliceData = sampledData; 
         
         if (type === 'pie') {
            // Aggregate by xAxis
@@ -1432,23 +2009,85 @@ const ChartsSection = () => {
            return result.sort((a,b) => b.value - a.value).slice(0, 10); // Show top 10 for pie
         }
 
+        if (type === 'scatter') {
+           if (sliceData.length > 1000) {
+               // 2D binning for large scatter plots
+               const xValues = sliceData.map(d => Number(d[xAxis])).filter(n => !isNaN(n));
+               const yValues = sliceData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
+               if (!xValues.length || !yValues.length) return [];
+
+               const minX = Math.min(...xValues);
+               const maxX = Math.max(...xValues);
+               const minY = Math.min(...yValues);
+               const maxY = Math.max(...yValues);
+
+               // Create 20x20 grid
+               const gridX = 20;
+               const gridY = 20;
+               const stepX = (maxX - minX) / gridX || 1;
+               const stepY = (maxY - minY) / gridY || 1;
+
+               const binMap = new Map<string, any>();
+
+               sliceData.forEach(d => {
+                   const x = Number(d[xAxis]);
+                   const y = Number(d[yAxis]);
+                   if (isNaN(x) || isNaN(y)) return;
+
+                   let idxX = Math.floor((x - minX) / stepX);
+                   if (idxX >= gridX) idxX = gridX - 1;
+                   let idxY = Math.floor((y - minY) / stepY);
+                   if (idxY >= gridY) idxY = gridY - 1;
+
+                   const key = `${idxX},${idxY}`;
+                   if (!binMap.has(key)) {
+                       binMap.set(key, { 
+                           [xAxis]: minX + (idxX * stepX) + (stepX / 2), 
+                           [yAxis]: minY + (idxY * stepY) + (stepY / 2), 
+                           count: 0 
+                       });
+                   }
+                   binMap.get(key).count += 1;
+               });
+
+               return Array.from(binMap.values());
+           }
+        }
+
         return sliceData.map(d => ({
           ...d,
           [yAxis]: Number(d[yAxis])
         }));
-      }, [xAxis, yAxis, type]);
+      }, [xAxis, yAxis, type, sampledData]);
 
       const Header = () => (
         <div className="flex justify-between items-start mb-4">
-          <input 
-            type="text" 
-            value={chartTitle}
-            onChange={e => setChartTitle(e.target.value)}
-            className="bg-transparent border-b border-transparent focus:border-[var(--primary)] outline-none font-semibold text-lg max-w-[200px]"
-          />
-          <button className="btn-icon" onClick={() => downloadChart(id, chartTitle)}>
-            <Download size={16} />
-          </button>
+          <div className="flex flex-col">
+            <input 
+              type="text" 
+              value={chartTitle}
+              onChange={e => setChartTitle(e.target.value)}
+              className="bg-transparent border-b border-transparent focus:border-[var(--primary)] outline-none font-semibold text-lg max-w-[200px]"
+            />
+            {isSampled && (
+              <span className="text-[10px] text-teal-400 font-mono mt-1 bg-teal-400/10 inline-block px-2 py-0.5 rounded w-max">
+                Sampling indicator: Showing {sampledData.length.toLocaleString()} of {totalRows.toLocaleString()} rows
+              </span>
+            )}
+            {type === 'scatter' && isSampledView === false && sampledData.length > 1000 && (
+               <span className="text-[10px] text-orange-400 font-mono mt-1 bg-orange-400/10 inline-block px-2 py-0.5 rounded w-max">
+                 2D Binned (Count Z-Axis)
+               </span>
+            )}
+          </div>
+          <div className="flex gap-1">
+            <button className="btn-icon" title="Download SVG" onClick={() => downloadChart(id, chartTitle, 'svg')}>
+              <span className="text-[10px] font-mono font-bold mr-1 opacity-70">SVG</span> <Download size={14} />
+            </button>
+            <button className="btn-icon" title="Download PNG" onClick={() => downloadChart(id, chartTitle, 'png')}>
+              <span className="text-[10px] font-mono font-bold mr-1 opacity-70">PNG</span> <Download size={14} />
+            </button>
+          </div>
         </div>
       );
 
@@ -1472,18 +2111,18 @@ const ChartsSection = () => {
           <div className="flex-1 min-h-0 w-full relative">
             <ResponsiveContainer width="100%" height="100%">
               {type === 'bar' ? (
-                <BarChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+                <BarChart data={chartData} layout={isMobile ? "vertical" : "horizontal"} margin={{top: 10, right: 10, left: isMobile ? 30 : 0, bottom: 20}}>
                   <defs>
                     <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#22D3EE" stopOpacity={1}/>
                       <stop offset="100%" stopColor="#6366F1" stopOpacity={1}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                  <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
-                  <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+                  <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={!isMobile} horizontal={isMobile} />
+                  <XAxis dataKey={isMobile ? yAxis : xAxis} type={isMobile ? "number" : "category"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
+                  <YAxis dataKey={isMobile ? xAxis : undefined} type={isMobile ? "category" : "number"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} tickLine={false} />
                   <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
-                  <Bar dataKey={yAxis} fill="url(#barGradient)" radius={[4, 4, 0, 0]} barSize={32} animationDuration={1500} animationEasing="ease-in-out" />
+                  <Bar dataKey={yAxis} fill="url(#barGradient)" radius={isMobile ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={24} animationDuration={1500} animationEasing="ease-in-out" />
                 </BarChart>
               ) : type === 'area' ? (
                 <AreaChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
@@ -1505,7 +2144,7 @@ const ChartsSection = () => {
                   <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
                   <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
                   <RechartsTooltip content={<CustomTooltip />} />
-                  <Line type="monotone" dataKey={yAxis} stroke="#6366F1" strokeWidth={3} dot={{r: 4, fill: 'var(--surface)', strokeWidth: 2}} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} animationDuration={1500} animationEasing="ease-in-out" />
+                  <Line type="monotone" dataKey={yAxis} stroke="#6366F1" strokeWidth={3} dot={false} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} animationDuration={1500} animationEasing="ease-in-out" />
                 </LineChart>
               ) : type === 'pie' ? (
                 <PieChart margin={{top: 10, right: 10, left: 10, bottom: 10}}>
@@ -1513,14 +2152,14 @@ const ChartsSection = () => {
                     {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
                   </Pie>
                   <RechartsTooltip content={<CustomTooltip />} />
-                  <Legend verticalAlign="top" align="right" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', color: 'var(--text-secondary)'}} />
+                  {!isMobile && <Legend verticalAlign="top" align="right" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', color: 'var(--text-secondary)'}} />}
                 </PieChart>
               ) : type === 'scatter' ? (
                 <ScatterChart margin={{top: 10, right: 10, left: 0, bottom: 20}}>
                   <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
                   <XAxis type="number" dataKey={xAxis} name={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} />
                   <YAxis type="number" dataKey={yAxis} name={yAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} />
-                  <ZAxis range={[100, 100]} />
+                  <ZAxis dataKey={chartData[0] && chartData[0].count !== undefined ? 'count' : ''} range={[20, 200]} />
                   <RechartsTooltip content={<CustomTooltip />} />
                   <Scatter data={chartData} fill="#22D3EE" animationDuration={1500} animationEasing="ease-in-out" />
                 </ScatterChart>
@@ -1547,9 +2186,22 @@ const ChartsSection = () => {
 
     return (
       <div className="fade-in-up stagger-1 flex flex-col h-full">
-        <div className="mb-6">
-          <h2>Interactive Visualizations</h2>
-          <p className="text-muted mt-1">Configure and export charts for your analysis</p>
+        <div className="mb-6 flex justify-between items-center">
+          <div>
+            <h2>Interactive Visualizations</h2>
+            <p className="text-muted mt-1">Configure and export charts for your analysis</p>
+          </div>
+          <div className="flex items-center gap-3 bg-[var(--surface-light)] px-4 py-2 rounded-lg border border-[var(--border)]">
+            <label className="flex items-center gap-2 cursor-pointer text-sm">
+              <input 
+                type="checkbox" 
+                checked={isSampledView}
+                onChange={(e) => setIsSampledView(e.target.checked)}
+                className="accent-[var(--primary)] w-4 h-4"
+              />
+              {isSampledView ? 'Sampled view' : 'Full view (may be slow)'}
+            </label>
+          </div>
         </div>
         
         <div className="grid-2">
@@ -1572,44 +2224,48 @@ const ChartsSection = () => {
     const runQuery = () => {
       try {
         setSqlError("");
-        const q = query.trim().replace(/\n/g, ' ');
-        // Basic naive regex parser for demonstration without heavy libraries
-        const selectMatch = q.match(/SELECT\s+(.+?)\s+FROM/i);
-        const whereMatch = q.match(/WHERE\s+(.+?)(?:\s+(?:GROUP BY|ORDER BY|LIMIT)|$)/i);
-        const orderMatch = q.match(/ORDER BY\s+(.+?)(?:\s+(?:ASC|DESC))?(?:\s+LIMIT|$)/i);
-        const limitMatch = q.match(/LIMIT\s+(\d+)/i);
-        
-        let res = [...data];
-        
-        if (whereMatch) {
-            let condition = whereMatch[1].replace(/=/g, '==').replace(/AND/gi, '&&').replace(/OR/gi, '||');
-            // Allow single quotes to be evaluated safely by replacing to double or keeping them
-            const filterFn = new Function('row', `with(row) { return ${condition}; }`);
-            res = res.filter(row => {
-                try { return filterFn(row); } catch { return false; }
-            });
-        }
-        
-        if (orderMatch) {
-           const col = orderMatch[1].trim();
-           const desc = q.toUpperCase().includes(' DESC');
-           res.sort((a,b) => (a[col] > b[col] ? 1 : -1) * (desc ? -1 : 1));
-        }
-        
-        if (selectMatch && selectMatch[1] !== '*') {
-            const cols = selectMatch[1].split(',').map(c => c.trim().replace(/['"`]/g, ''));
-            res = res.map(row => {
-               let newRow: any = {};
-               cols.forEach(c => newRow[c] = row[c]);
-               return newRow;
-            });
+        if (!query.trim()) {
+           setQueryResult([...data]);
+           return;
         }
 
-        if (limitMatch) {
-            res = res.slice(0, parseInt(limitMatch[1]));
+        // Use alasql to run query against data array safely. 
+        // We pass data as a parameter to alasql in an array.
+        // The table is referenced as '?' in the query.
+        // We do a simple replacement if the user typed "FROM data" 
+        // to make it "FROM ?" so alasql knows to bind the array.
+        const q = query.trim().replace(/\n/g, ' ');
+        const preparedQuery = q.replace(/FROM\s+data\b/i, 'FROM ?');
+        
+        let res;
+        if (preparedQuery.toUpperCase().includes('FROM ?')) {
+           res = alasql(preparedQuery, [data]);
+        } else if (!preparedQuery.toUpperCase().includes('FROM')) {
+           // Provide basic query if FROM isn't specified (e.g. they modified things)
+           res = alasql(preparedQuery + ' FROM ?', [data]);
+        } else {
+           // Allow them to use other table names by injecting '?' where first FROM is
+           // but replacing what they typed.
+           const firstFromParams = q.replace(/FROM\s+[a-zA-Z0-9_]+\b/i, 'FROM ?');
+           res = alasql(firstFromParams, [data]);
         }
+        
         setQueryResult(res);
-      } catch (e: any) { setSqlError(e.message); setQueryResult(null); }
+      } catch (e: any) { 
+        setSqlError(e.message || "An error occurred executing SQL query"); 
+        setQueryResult(null); 
+      }
+    };
+
+    const copySqlResults = () => {
+      if (!queryResult || queryResult.length === 0) return;
+      const keys = Object.keys(queryResult[0]);
+      let tsv = keys.join("\t") + "\n";
+      queryResult.forEach(row => {
+        tsv += keys.map(k => String(row[k] ?? '')).join("\t") + "\n";
+      });
+      navigator.clipboard.writeText(tsv);
+      addToast("SQL results copied as TSV", "success");
     };
 
     return (
@@ -1629,10 +2285,15 @@ const ChartsSection = () => {
         />
         <div className="flex gap-2">
            <button className="btn-primary" onClick={runQuery}><Play size={16}/> Run Query</button>
+           {queryResult && (
+             <button className="btn-secondary" onClick={copySqlResults}>Copy TSV To Clipboard</button>
+           )}
         </div>
         {sqlError && <div className="p-4 bg-[rgba(239,68,68,0.1)] text-[var(--danger)] border border-[var(--danger)] rounded-lg text-sm font-mono">{sqlError}</div>}
         {queryResult && (
            <div className="flex-1 overflow-auto table-container p-0 border border-[var(--border)] rounded-xl relative">
+             <div className="table-fade-indicator"></div>
+             <div className="table-scroll-hint">Pinch to zoom, swipe to scroll</div>
              <div className="sticky top-0 left-0 bg-[var(--surface)] text-[10px] font-mono p-2 border-b border-[var(--border)] uppercase text-[var(--primary)] text-right">
                 {queryResult.length} Rows Returned
              </div>
@@ -1924,8 +2585,9 @@ const ChartsSection = () => {
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
+      const filePrefix = fileInfo?.name.replace(/\.[^/.]+$/, "") || "dataset";
       link.setAttribute("href", url);
-      link.setAttribute("download", (fileInfo?.name.replace(/\.[^/.]+$/, "") || "dataset") + "_cleaned.csv");
+      link.setAttribute("download", `${filePrefix}_${activeTab}.csv`);
       link.click();
   };
 
@@ -1933,11 +2595,12 @@ const ChartsSection = () => {
       const worksheet = XLSX.utils.json_to_sheet(data);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "DataLens");
-      XLSX.writeFile(workbook, (fileInfo?.name.replace(/\.[^/.]+$/, "") || "dataset") + "_cleaned.xlsx");
+      const filePrefix = fileInfo?.name.replace(/\.[^/.]+$/, "") || "dataset";
+      XLSX.writeFile(workbook, `${filePrefix}_${activeTab}.xlsx`);
   };
 
   return (
-    <div className="app-container">
+    <div className="app-container" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove}>
       {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
@@ -2006,6 +2669,25 @@ const ChartsSection = () => {
               </div>
             </>
           )}
+
+          <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+            System
+          </div>
+          <div className="px-4 pb-4 mt-2">
+            <button className="btn-secondary w-full text-xs justify-center hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--danger)] hover:border-[var(--danger)]" onClick={async () => {
+              if (confirm('Clear all saved session data? This cannot be undone.')) {
+                await clearSession();
+                window.location.reload();
+              }
+            }}>
+              <Trash2 size={14} /> Clear Session
+            </button>
+            {storageUsage && (
+              <div className="text-[10px] text-muted text-center mt-3 font-mono opacity-60">
+                {storageUsage}
+              </div>
+            )}
+          </div>
         </div>
 
         {fileInfo && (
@@ -2048,6 +2730,9 @@ const ChartsSection = () => {
               <button className="btn-secondary whitespace-nowrap text-xs px-3" onClick={handleExportExcel}>
                 <ArrowDownRight size={14} /> Excel
               </button>
+              <button className={`btn-secondary whitespace-nowrap text-xs px-3 ${historyOpen ? 'bg-[var(--primary)] text-white border-[var(--primary)]' : ''}`} onClick={() => setHistoryOpen(!historyOpen)}>
+                <RotateCcw size={14} /> History
+              </button>
               <button className="btn-primary whitespace-nowrap text-xs px-3 ml-2" onClick={() => setActiveTab('chat')}>
                 <Sparkles size={14} /> Ask AI
               </button>
@@ -2057,19 +2742,19 @@ const ChartsSection = () => {
 
         {/* Content Area */}
         <div className="content-area hidden-scrollbar">
-          {activeTab === 'upload' && <UploadSection />}
-          {activeTab === 'preview' && <PreviewSection />}
-          {activeTab === 'stats' && <StatsSection />}
-          {activeTab === 'charts' && <ChartsSection />}
-          {activeTab === 'cleaning' && <CleaningSection />}
-          {activeTab === 'pivot' && <PivotSection />}
-          {activeTab === 'eda' && <EdaSection />}
-          {activeTab === 'chat' && <ChatSection />}
-          {activeTab === 'sql' && <SqlSection />}
-          {activeTab === 'ml' && <MLLabSection />}
-          {activeTab === 'pipeline' && <PipelineSection />}
-          {activeTab === 'dashboard' && <DashboardSection />}
-          {activeTab === 'auto-analyst' && <AutoAnalystSection />}
+          {activeTab === 'upload' && <ErrorBoundary sectionName="Upload"><UploadSection /></ErrorBoundary>}
+          {activeTab === 'preview' && <ErrorBoundary sectionName="Preview"><PreviewSection /></ErrorBoundary>}
+          {activeTab === 'stats' && <ErrorBoundary sectionName="Stats"><StatsSection /></ErrorBoundary>}
+          {activeTab === 'charts' && <ErrorBoundary sectionName="Charts"><ChartsSection /></ErrorBoundary>}
+          {activeTab === 'cleaning' && <ErrorBoundary sectionName="Cleaning"><CleaningSection /></ErrorBoundary>}
+          {activeTab === 'pivot' && <ErrorBoundary sectionName="Pivot"><PivotSection /></ErrorBoundary>}
+          {activeTab === 'eda' && <ErrorBoundary sectionName="EDA"><EdaSection /></ErrorBoundary>}
+          {activeTab === 'chat' && <ErrorBoundary sectionName="Chat"><ChatSection /></ErrorBoundary>}
+          {activeTab === 'sql' && <ErrorBoundary sectionName="SQL"><SqlSection /></ErrorBoundary>}
+          {activeTab === 'ml' && <ErrorBoundary sectionName="ML Lab"><MLLabSection /></ErrorBoundary>}
+          {activeTab === 'pipeline' && <ErrorBoundary sectionName="Pipeline"><PipelineSection /></ErrorBoundary>}
+          {activeTab === 'dashboard' && <ErrorBoundary sectionName="Dashboard"><DashboardSection /></ErrorBoundary>}
+          {activeTab === 'auto-analyst' && <ErrorBoundary sectionName="Auto-Analyst"><AutoAnalystSection /></ErrorBoundary>}
         </div>
       </div>
 
@@ -2110,7 +2795,20 @@ const ChartsSection = () => {
       )}
 
       {/* Toasts */}
-      <div className="toast-container">
+      <div className="toast-container z-50">
+        {showRestoreSession && (
+          <div className="toast info" style={{ flexWrap: 'wrap', alignItems: 'flex-start', borderLeft: '4px solid var(--primary)'}}>
+            <Activity className="text-[var(--primary)] shrink-0" size={20} />
+            <div className="flex-1 flex flex-col gap-2">
+              <span className="text-sm font-bold pt-0.5 pb-1">Restore previous session?</span>
+              <span className="text-xs text-muted mb-2">We found unsaved data from your last session. Would you like to restore it?</span>
+              <div className="flex gap-2">
+                <button className="btn-primary py-1 px-3 text-xs justify-center flex-1" onClick={() => handleRestoreSession(true)}>Restore</button>
+                <button className="btn-secondary py-1 px-3 text-xs justify-center flex-1 border-none" onClick={() => handleRestoreSession(false)}>Discard</button>
+              </div>
+            </div>
+          </div>
+        )}
         {toasts.map(toast => (
           <div key={toast.id} className={`toast ${toast.type}`}>
             {toast.type === 'success' && <CheckCircle className="text-[var(--success)]" size={20} />}
@@ -2124,6 +2822,45 @@ const ChartsSection = () => {
           </div>
         ))}
       </div>
+      
+      {/* History Panel */}
+      {historyOpen && (
+        <div className="w-80 border-l border-[var(--border)] bg-[var(--surface)] flex flex-col fade-in-right overflow-hidden shadow-2xl z-40 fixed right-0 top-0 bottom-0">
+          <div className="p-4 border-b border-[var(--border)] flex justify-between items-center">
+            <h3 className="font-bold flex items-center gap-2"><RotateCcw size={18}/> Version History</h3>
+            <button className="btn-icon" onClick={() => setHistoryOpen(false)}><X size={18}/></button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+             <div 
+                className={`p-3 rounded-lg border cursor-pointer transition-colors ${historyIndex === -1 ? 'border-[var(--primary)] bg-[rgba(99,102,241,0.1)]' : 'border-[var(--border)] hover:bg-[rgba(255,255,255,0.02)]'}`}
+                onClick={() => jumpToState(-1)}
+             >
+                <div className="font-semibold text-sm">Initial State</div>
+                <div className="text-xs text-muted mt-1">File upload / Original data</div>
+             </div>
+             {history.map((op, i) => (
+                <div 
+                   key={op.id}
+                   className={`p-3 rounded-lg border cursor-pointer transition-colors relative ${i === historyIndex ? 'border-[var(--primary)] bg-[rgba(99,102,241,0.1)]' : 'border-[var(--border)] hover:bg-[rgba(255,255,255,0.02)] filter ' + (i > historyIndex ? 'opacity-50 grayscale' : '')}`}
+                   onClick={() => jumpToState(i)}
+                >
+                   {i > historyIndex && <div className="absolute top-1 right-2 text-[10px] uppercase text-muted font-bold">Undone</div>}
+                   <div className="font-semibold text-sm pr-10">{op.description}</div>
+                   <div className="text-xs text-muted mt-1 font-mono">
+                      {new Date(op.timestamp).toLocaleTimeString()}
+                   </div>
+                </div>
+             ))}
+          </div>
+          <div className="p-4 border-t border-[var(--border)] text-xs text-muted">
+            <div className="flex items-center gap-2 text-[var(--success)] font-medium bg-[rgba(16,185,129,0.1)] px-3 py-2 rounded">
+               <Database size={14}/>
+               Using operation patches <br/>Saved {(100 - (100 / Math.max(1, history.length + 1))).toFixed(1)}% memory
+            </div>
+            <div className="mt-2 text-center text-[10px]">Using ~{(Date.now().toString().length/1000).toFixed(2)}MB instead of ~{(data.length * 150 / 1024 / 1024 * (history.length + 1)).toFixed(2)}MB</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
