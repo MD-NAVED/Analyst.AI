@@ -19,6 +19,8 @@ import { saveSession, loadSession, clearSession, getStorageEstimate } from './li
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import alasql from 'alasql';
+import { SimpleLinearRegression } from 'ml-regression-simple-linear';
+import { kmeans } from 'ml-kmeans';
 
 // --- TYPES ---
 interface ErrorBoundaryProps {
@@ -33,7 +35,7 @@ interface ErrorBoundaryState {
   copied: boolean;
 }
 
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends ReactComponent<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null, errorInfo: null, copied: false };
@@ -309,6 +311,161 @@ const calculateStats = (data: any[], col: string) => {
   return { count, mean, median, min, max, stdDev, nullCount, nullPercent };
 };
 
+interface PCAResult {
+  pc1: number[];
+  pc2: number[];
+}
+
+const getPCA2D = (dataPoints: number[][]): PCAResult => {
+  const numRows = dataPoints.length;
+  if (numRows === 0) return { pc1: [], pc2: [] };
+  const numCols = dataPoints[0].length;
+  if (numCols === 0) return { pc1: [], pc2: [] };
+  
+  if (numCols === 1) {
+    return {
+      pc1: dataPoints.map(r => r[0]),
+      pc2: dataPoints.map((_, i) => i)
+    };
+  }
+
+  // 1. Mean center the data
+  const means = Array(numCols).fill(0);
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      means[c] += dataPoints[r][c];
+    }
+  }
+  for (let c = 0; c < numCols; c++) {
+    means[c] /= numRows;
+  }
+  
+  const centered = dataPoints.map(row => row.map((val, c) => val - means[c]));
+  
+  // 2. Covariance matrix
+  const cov = Array(numCols).fill(0).map(() => Array(numCols).fill(0));
+  for (let i = 0; i < numCols; i++) {
+    for (let j = 0; j < numCols; j++) {
+      let sum = 0;
+      for (let r = 0; r < numRows; r++) {
+        sum += centered[r][i] * centered[r][j];
+      }
+      cov[i][j] = sum / (numRows - 1 || 1);
+    }
+  }
+  
+  // 3. Power iteration to find eigenvectors
+  const powerIteration = (matrix: number[][], numIterations = 100): number[] => {
+    let b = Array(numCols).fill(0).map(() => Math.random() - 0.5);
+    let norm = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+    b = b.map(val => val / (norm || 1));
+    
+    for (let iter = 0; iter < numIterations; iter++) {
+      const nextB = Array(numCols).fill(0);
+      for (let i = 0; i < numCols; i++) {
+        for (let j = 0; j < numCols; j++) {
+          nextB[i] += matrix[i][j] * b[j];
+        }
+      }
+      norm = Math.sqrt(nextB.reduce((sum, val) => sum + val * val, 0));
+      if (norm === 0) break;
+      b = nextB.map(val => val / norm);
+    }
+    return b;
+  };
+  
+  // First PC
+  const pc1Vector = powerIteration(cov);
+  
+  // Deflate covariance matrix for second PC
+  let lambda1 = 0;
+  const temp = Array(numCols).fill(0);
+  for (let i = 0; i < numCols; i++) {
+    for (let j = 0; j < numCols; j++) {
+      temp[i] += cov[i][j] * pc1Vector[j];
+    }
+    lambda1 += pc1Vector[i] * temp[i];
+  }
+  
+  const covDeflated = Array(numCols).fill(0).map(() => Array(numCols).fill(0));
+  for (let i = 0; i < numCols; i++) {
+    for (let j = 0; j < numCols; j++) {
+      covDeflated[i][j] = cov[i][j] - lambda1 * pc1Vector[i] * pc1Vector[j];
+    }
+  }
+  
+  // Second PC
+  const pc2Vector = powerIteration(covDeflated);
+  
+  // Project
+  const pc1 = centered.map(row => row.reduce((sum, val, c) => sum + val * pc1Vector[c], 0));
+  const pc2 = centered.map(row => row.reduce((sum, val, c) => sum + val * pc2Vector[c], 0));
+  
+  return { pc1, pc2 };
+};
+
+const euclideanDistance = (p1: number[], p2: number[]): number => {
+  let sum = 0;
+  for (let i = 0; i < p1.length; i++) {
+    sum += Math.pow(p1[i] - p2[i], 2);
+  }
+  return Math.sqrt(sum);
+};
+
+const calculateSilhouetteScore = (points: number[][], clusters: number[]): number => {
+  const n = points.length;
+  if (n <= 1) return 0;
+  
+  const uniqueClusters = Array.from(new Set(clusters));
+  if (uniqueClusters.length <= 1) return 0;
+  
+  const clusterGroups: Record<number, number[][]> = {};
+  uniqueClusters.forEach(c => { clusterGroups[c] = []; });
+  for (let i = 0; i < n; i++) {
+    clusterGroups[clusters[i]].push(points[i]);
+  }
+  
+  let totalSilhouette = 0;
+  for (let i = 0; i < n; i++) {
+    const currentPoint = points[i];
+    const currentCluster = clusters[i];
+    
+    // a(i)
+    const sameClusterPoints = clusterGroups[currentCluster];
+    let a = 0;
+    if (sameClusterPoints.length > 1) {
+      let distSum = 0;
+      for (let j = 0; j < sameClusterPoints.length; j++) {
+        if (sameClusterPoints[j] === currentPoint) continue;
+        distSum += euclideanDistance(currentPoint, sameClusterPoints[j]);
+      }
+      a = distSum / (sameClusterPoints.length - 1);
+    }
+    
+    // b(i)
+    let b = Infinity;
+    for (const c of uniqueClusters) {
+      if (c === currentCluster) continue;
+      const otherClusterPoints = clusterGroups[c];
+      if (otherClusterPoints.length === 0) continue;
+      
+      let distSum = 0;
+      for (let j = 0; j < otherClusterPoints.length; j++) {
+        distSum += euclideanDistance(currentPoint, otherClusterPoints[j]);
+      }
+      const meanDist = distSum / otherClusterPoints.length;
+      if (meanDist < b) {
+        b = meanDist;
+      }
+    }
+    
+    const s = (b - a) / Math.max(a, b || 1);
+    totalSilhouette += s;
+  }
+  
+  return totalSilhouette / n;
+};
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'pivot' | 'eda' | 'chat' | 'sql' | 'ml' | 'dashboard' | 'pipeline' | 'auto-analyst'>('upload');
@@ -333,6 +490,15 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [chatTyping, setChatTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [chatMemory, setChatMemory] = useState('');
+  const [savedConversations, setSavedConversations] = useState<any[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('datalens_saved_chats') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [tokenEstimate, setTokenEstimate] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showRestoreSession, setShowRestoreSession] = useState(false);
@@ -1754,16 +1920,31 @@ STRICT RULES:
      const sendMessage = async (text: string) => {
          if (!text.trim()) return;
          const newMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: text };
-         setChatMessages(prev => [...prev, newMsg]);
+         let currentMessages = [...chatMessages, newMsg];
+         setChatMessages(currentMessages);
          setChatInput('');
          
          setChatTyping(true);
          try {
+             let activeMemory = chatMemory;
+             // Requirement 1 & 2: After 10 messages, summarize into memory string, keeping last 4 + memory
+             if (currentMessages.length > 10) {
+                 const msgsToCompress = currentMessages.slice(1, currentMessages.length - 4); // skip greeting, take older
+                 if (msgsToCompress.length > 0) {
+                     const summarizePrompt = `Summarize the following chat history to serve as a compact context memory for future turns. Update the previous memory with any new important info.\n\nPrevious memory: ${activeMemory}\n\nChat:\n${msgsToCompress.map(m=>`${m.role}: ${m.content}`).join('\n')}`;
+                     const sumResult = await callAI({ contents: [{role: 'user', parts: [{text: summarizePrompt}]}]});
+                     activeMemory = sumResult.text || activeMemory;
+                     setChatMemory(activeMemory);
+                     currentMessages = [currentMessages[0], ...currentMessages.slice(currentMessages.length - 4)];
+                     setChatMessages(currentMessages);
+                 }
+             }
+
              const colsContext = columns.map(c => c.name).join(', ');
              const sampleData = JSON.stringify(data.slice(0, 3));
-             const systemPrompt = `You are an AI Data Assistant. The user's dataset has columns: ${colsContext}. Sample data: ${sampleData}. Provide concise, helpful answers. Use text only, avoid markdown where possible.`;
+             const systemPrompt = `You are an AI Data Assistant. The dataset has columns: ${colsContext}. Sample data: ${sampleData}.\n${activeMemory ? `Memory Context: ${activeMemory}\n` : ''}Provide concise, helpful answers.`;
              
-             const historyForAPI = chatMessages.slice(1).map(m => ({ // Skip greeting
+             const historyForAPI = currentMessages.slice(1).map(m => ({ // Skip greeting
                  role: m.role,
                  parts: [{text: m.content}]
              }));
@@ -1774,6 +1955,9 @@ STRICT RULES:
                  {role: 'model', parts: [{text: "Understood. I will be concise."}]},
                  ...historyForAPI
              ];
+
+             const tokenCountEstimate = Math.round(JSON.stringify(contents).length / 4);
+             setTokenEstimate(tokenCountEstimate);
 
              const result = await callAI({ contents });
              
@@ -1790,6 +1974,7 @@ STRICT RULES:
 
      const exportChatMD = () => {
          let md = `# DataLens AI Chat Export\n\n`;
+         md += `**Active Memory:**\n${chatMemory || 'None'}\n\n`;
          chatMessages.forEach(m => {
              const role = m.role === 'user' ? '## User' : '## AI Assistant';
              md += `${role}\n${m.content}\n\n`;
@@ -1809,26 +1994,70 @@ STRICT RULES:
 
      return (
        <div className="fade-in-up stagger-1 flex flex-col h-full">
-         <div className="flex justify-between items-center mb-4">
+         <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
            <div>
              <h2>AI Data Assistant</h2>
              <p className="text-muted mt-1">Talk to your dataset naturally</p>
+             <div className="font-mono text-[10px] text-[var(--accent)] mt-1">
+                ~{tokenEstimate.toLocaleString()} tokens used
+                {tokenEstimate > 4000 && <span className="ml-2 text-[var(--danger)]">Approaching rate limits!</span>}
+             </div>
            </div>
-           <div className="flex gap-2">
-               <button className="btn-secondary" onClick={exportChatMD}>
-                  <Download size={16} /> Export Chat
+           <div className="flex gap-2 flex-wrap items-center">
+               <span className="text-xs text-muted">History: {chatMessages.length}/10</span>
+               <select className="premium-input premium-select h-8 text-xs py-0 w-32" onChange={(e) => {
+                   if (e.target.value) {
+                       const c = savedConversations[parseInt(e.target.value)];
+                       if (c && window.confirm("Load conversation? Current unsaved chat will be lost.")) {
+                           setChatMessages(c.messages);
+                           setChatMemory(c.memory || '');
+                           addToast("Conversation loaded", "info");
+                       }
+                       e.target.value = "";
+                   }
+               }}>
+                   <option value="">Load Saved...</option>
+                   {savedConversations.map((c, i) => <option key={i} value={i}>{c.name}</option>)}
+               </select>
+               <button className="btn-secondary h-8 px-3 text-xs" onClick={() => {
+                   const name = prompt("Enter conversation name to save:");
+                   if (name) {
+                       const obj = {name, messages: [...chatMessages], memory: chatMemory};
+                       const updated = [...savedConversations, obj];
+                       setSavedConversations(updated);
+                       localStorage.setItem('datalens_saved_chats', JSON.stringify(updated));
+                       addToast("Conversation saved", "success");
+                   }
+               }}>
+                  Save State
                </button>
-               <button className="btn-secondary" onClick={() => setChatMessages([chatMessages[0]])}>
-                  Clear Chat
+               <button className="btn-secondary h-8 px-3 text-xs" onClick={() => {
+                   if (window.confirm("Fork this conversation context into a new branch?")) {
+                       setChatMessages([...chatMessages, { id: 'fork', 'role': 'model', content: '-- Branch Forked Here --' }]);
+                   }
+               }}>
+                  Fork Context
+               </button>
+               <button className="btn-secondary h-8 px-3 text-xs" onClick={exportChatMD}>
+                  <Download size={14} /> Export MD
+               </button>
+               <button className="btn-secondary h-8 px-3 text-xs" onClick={() => { setChatMessages([chatMessages[0]]); setChatMemory(''); setTokenEstimate(0); }}>
+                  Clear Context
                </button>
            </div>
          </div>
 
          <div className="premium-card flex-1 flex flex-col p-0 overflow-hidden chat-container">
+            {chatMemory && (
+                <div className="p-3 bg-[rgba(255,255,255,0.03)] border-b border-[var(--border)] text-xs text-[var(--text-muted)] font-mono flex gap-2 overflow-auto" style={{maxHeight:'100px'}}>
+                    <span className="font-bold shrink-0 text-[var(--primary)]">ACTIVE MEMORY:</span>
+                    <span>{chatMemory}</span>
+                </div>
+            )}
             <div className="chat-messages hidden-scrollbar" ref={scrollRef}>
                 {chatMessages.map(msg => (
-                    <div key={msg.id} className={msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai ml-4'}>
-                        {msg.role === 'model' && (
+                    <div key={msg.id} className={msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai ml-4'} style={msg.id === 'fork' ? { background: 'transparent', border: '1px dashed var(--border)', textAlign: 'center', opacity: 0.5, fontStyle: 'italic', padding:'8px'} : {}}>
+                        {msg.role === 'model' && msg.id !== 'fork' && (
                             <div className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center text-[var(--primary)] shadow-sm">
                                 <Sparkles size={14} />
                             </div>
@@ -2306,53 +2535,264 @@ const ChartsSection = () => {
                    <tr key={i}>{Object.values(row).map((v: any, j) => <td key={j}>{String(v)}</td>)}</tr>
                  ))}
                </tbody>
-             </table>
+</table>
            </div>
         )}
       </div>
     );
-  };
-
-  const MLLabSection = () => {
+  };  const MLLabSection = () => {
     const numericCols = columns.filter(c => c.type === 'number');
     const [modelType, setModelType] = useState<'lr' | 'kmeans'>('lr');
     const [xCol, setXCol] = useState(numericCols[0]?.name || '');
     const [yCol, setYCol] = useState(numericCols[1]?.name || '');
+    const [trainSplit, setTrainSplit] = useState(80);
+    
+    const [kClusters, setKClusters] = useState(3);
+    const [kmeansCols, setKmeansCols] = useState<string[]>([]);
+    
+    const [predictionInput, setPredictionInput] = useState('');
+    const [predictionResult, setPredictionResult] = useState<number | null>(null);
+
     const [result, setResult] = useState<any>(null);
     const [training, setTraining] = useState(false);
 
+    const evaluateModel = (yActual: number[], yPred: number[]) => {
+      const n = yActual.length;
+      if (n === 0) return { r2: 0, mse: 0, mae: 0 };
+      const meanY = yActual.reduce((sum, val) => sum + val, 0) / n;
+      let ssTot = 0;
+      let ssRes = 0;
+      let absErrorSum = 0;
+      for (let i = 0; i < n; i++) {
+        ssTot += Math.pow(yActual[i] - meanY, 2);
+        ssRes += Math.pow(yActual[i] - yPred[i], 2);
+        absErrorSum += Math.abs(yActual[i] - yPred[i]);
+      }
+      const r2 = ssTot === 0 ? 0 : 1 - (ssRes / ssTot);
+      const mse = ssRes / n;
+      const mae = absErrorSum / n;
+      return { r2, mse, mae };
+    };
+
     const trainModel = () => {
+       if (data.length === 0) {
+          addToast('No data available to train model', 'error');
+          return;
+       }
        setTraining(true);
+       setResult(null);
+       setPredictionResult(null);
+       setPredictionInput('');
+
        setTimeout(() => {
-           if (modelType === 'lr') {
-               const x = data.map(d => Number(d[xCol])).filter(n => !isNaN(n));
-               const y = data.map(d => Number(d[yCol])).filter(n => !isNaN(n));
-               const n = Math.min(x.length, y.length);
-               let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-               for(let i=0; i<n; i++) {
-                   sumX += x[i]; sumY += y[i];
-                   sumXY += x[i]*y[i]; sumXX += x[i]*x[i];
-               }
-               const m = (n*sumXY - sumX*sumY) / (n*sumXX - sumX*sumX);
-               const b = (sumY - m*sumX) / n;
-               
-               const meanY = sumY/n;
-               let ssTot = 0, ssRes = 0;
-               for(let i=0; i<n; i++) {
-                   const yPred = m*x[i] + b;
-                   ssTot += Math.pow(y[i] - meanY, 2);
-                   ssRes += Math.pow(y[i] - yPred, 2);
-               }
-               const r2 = 1 - (ssRes/ssTot);
-               
-               setResult({ type: 'lr', m, b, r2 });
-           } else if (modelType === 'kmeans') {
-               // Pseudo K-Means result for UX demo (in real, implement iterations)
-               setResult({ type: 'kmeans', k: 3, inertia: 1450.2, silhouette: 0.65 });
-           }
-           setTraining(false);
-           addToast('Model trained successfully', 'success');
+          try {
+              if (modelType === 'lr') {
+                  if (!xCol || !yCol) {
+                      throw new Error('Please select both X and Y columns');
+                  }
+                  
+                  const pairs = data.map(d => ({
+                      x: Number(d[xCol]),
+                      y: Number(d[yCol])
+                  })).filter(p => !isNaN(p.x) && !isNaN(p.y));
+                  
+                  if (pairs.length < 5) {
+                      throw new Error('Dataset must contain at least 5 rows with numeric values for both columns');
+                  }
+                  
+                  const splitRatio = trainSplit / 100;
+                  const shuffled = [...pairs].sort(() => Math.random() - 0.5);
+                  const trainSize = Math.floor(shuffled.length * splitRatio);
+                  const trainPairs = shuffled.slice(0, trainSize);
+                  const testPairs = shuffled.slice(trainSize);
+                  
+                  if (trainPairs.length === 0 || testPairs.length === 0) {
+                      throw new Error('Invalid train/test split. Make sure dataset size is sufficient.');
+                  }
+                  
+                  const xTrain = trainPairs.map(p => p.x);
+                  const yTrain = trainPairs.map(p => p.y);
+                  const xTest = testPairs.map(p => p.x);
+                  const yTest = testPairs.map(p => p.y);
+                  
+                  const regression = new SimpleLinearRegression(xTrain, yTrain);
+                  const m = regression.slope !== undefined ? regression.slope : (regression as any).coefficients[1];
+                  const b = regression.intercept !== undefined ? regression.intercept : (regression as any).coefficients[0];
+                  
+                  const yTrainPred = xTrain.map(xVal => regression.predict(xVal));
+                  const yTestPred = xTest.map(xVal => regression.predict(xVal));
+                  
+                  const trainEval = evaluateModel(yTrain, yTrainPred);
+                  const testEval = evaluateModel(yTest, yTestPred);
+                  
+                  const residuals = testPairs.slice(0, 300).map(p => {
+                      const pred = regression.predict(p.x);
+                      return {
+                          predicted: pred,
+                          residual: p.y - pred
+                      };
+                  });
+                  
+                  setResult({
+                      type: 'lr',
+                      m,
+                      b,
+                      trainR2: trainEval.r2,
+                      testR2: testEval.r2,
+                      trainMse: trainEval.mse,
+                      testMse: testEval.mse,
+                      trainMae: trainEval.mae,
+                      testMae: testEval.mae,
+                      residuals,
+                      regressionInstance: regression,
+                      xLabel: xCol,
+                      yLabel: yCol
+                  });
+                  addToast('Regression model trained successfully', 'success');
+              } else if (modelType === 'kmeans') {
+                  const selectedCols = kmeansCols.length > 0 ? kmeansCols : numericCols.map(c => c.name);
+                  if (selectedCols.length === 0) {
+                      throw new Error('No numeric features available for clustering');
+                  }
+                  
+                  const matrix = data.map(d => selectedCols.map(col => Number(d[col]))).filter(row => row.every(n => !isNaN(n)));
+                  
+                  if (matrix.length < kClusters) {
+                      throw new Error(`Dataset must have at least ${kClusters} rows with valid numeric feature values`);
+                  }
+                  
+                  const kmeansResult = kmeans(matrix, kClusters, {
+                      maxIterations: 100
+                  });
+                  
+                  let finalInertia = 0;
+                  for (let i = 0; i < matrix.length; i++) {
+                      const clusterIdx = kmeansResult.clusters[i];
+                      const centroidCoords = kmeansResult.centroids[clusterIdx];
+                      finalInertia += Math.pow(euclideanDistance(matrix[i], centroidCoords), 2);
+                  }
+                  
+                  const silhouetteSampleSize = Math.min(matrix.length, 300);
+                  const sampledIndices: number[] = [];
+                  const pool = Array.from({ length: matrix.length }, (_, i) => i);
+                  for (let i = 0; i < silhouetteSampleSize; i++) {
+                      const r = Math.floor(Math.random() * pool.length);
+                      sampledIndices.push(pool[r]);
+                      pool[r] = pool[pool.length - 1];
+                      pool.pop();
+                  }
+                  const sampledPoints = sampledIndices.map(idx => matrix[idx]);
+                  const sampledClusters = sampledIndices.map(idx => kmeansResult.clusters[idx]);
+                  const silhouetteScore = calculateSilhouetteScore(sampledPoints, sampledClusters);
+                  
+                  const elbowSampleSize = Math.min(matrix.length, 1000);
+                  const elbowSample = matrix.slice(0, elbowSampleSize);
+                  const elbowData: { k: number; inertia: number }[] = [];
+                  
+                  let k1Inertia = 0;
+                  if (elbowSample.length > 0) {
+                      const meanPoint = Array(selectedCols.length).fill(0);
+                      for (let i = 0; i < elbowSample.length; i++) {
+                          for (let j = 0; j < selectedCols.length; j++) {
+                              meanPoint[j] += elbowSample[i][j];
+                          }
+                      }
+                      meanPoint.forEach((_, idx) => meanPoint[idx] /= elbowSample.length);
+                      for (let i = 0; i < elbowSample.length; i++) {
+                          k1Inertia += Math.pow(euclideanDistance(elbowSample[i], meanPoint), 2);
+                      }
+                  }
+                  elbowData.push({ k: 1, inertia: k1Inertia });
+                  
+                  for (let k = 2; k <= 8; k++) {
+                      try {
+                          const kRes = kmeans(elbowSample, k, { maxIterations: 30 });
+                          let kInertia = 0;
+                          for (let i = 0; i < elbowSample.length; i++) {
+                              const cIdx = kRes.clusters[i];
+                              const centCoords = kRes.centroids[cIdx];
+                              kInertia += Math.pow(euclideanDistance(elbowSample[i], centCoords), 2);
+                          }
+                          elbowData.push({ k, inertia: kInertia });
+                      } catch (err) {
+                          // Ignore
+                      }
+                  }
+                  
+                  const plotSampleSize = Math.min(matrix.length, 500);
+                  const plotSamplePoints = matrix.slice(0, plotSampleSize);
+                  const plotSampleClusters = kmeansResult.clusters.slice(0, plotSampleSize);
+                  
+                  let plotData: any[] = [];
+                  let isPCA = false;
+                  let xLabel = '';
+                  let yLabel = '';
+                  
+                  if (selectedCols.length === 1) {
+                      plotData = plotSamplePoints.map((p, idx) => ({
+                          x: p[0],
+                          y: idx,
+                          cluster: plotSampleClusters[idx]
+                      }));
+                      xLabel = selectedCols[0];
+                      yLabel = 'Index';
+                  } else if (selectedCols.length === 2) {
+                      plotData = plotSamplePoints.map((p, idx) => ({
+                          x: p[0],
+                          y: p[1],
+                          cluster: plotSampleClusters[idx]
+                      }));
+                      xLabel = selectedCols[0];
+                      yLabel = selectedCols[1];
+                  } else {
+                      const { pc1, pc2 } = getPCA2D(plotSamplePoints);
+                      plotData = plotSamplePoints.map((_, idx) => ({
+                          x: pc1[idx],
+                          y: pc2[idx],
+                          cluster: plotSampleClusters[idx]
+                      }));
+                      isPCA = true;
+                      xLabel = 'PC1';
+                      yLabel = 'PC2';
+                  }
+                  
+                  setResult({
+                      type: 'kmeans',
+                      k: kClusters,
+                      inertia: finalInertia,
+                      silhouette: silhouetteScore,
+                      elbowData,
+                      plotData,
+                      isPCA,
+                      xLabel,
+                      yLabel,
+                      selectedCols
+                  });
+                  addToast('K-Means clustering completed', 'success');
+              }
+          } catch (e: any) {
+              console.error(e);
+              addToast(e.message || 'Model training failed', 'error');
+          } finally {
+              setTraining(false);
+          }
        }, 800);
+    };
+
+    const handlePredict = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!result || result.type !== 'lr' || !predictionInput) return;
+        const xVal = parseFloat(predictionInput);
+        if (isNaN(xVal)) {
+            addToast('Please enter a valid numeric value for X', 'error');
+            return;
+        }
+        try {
+            const yVal = result.regressionInstance.predict(xVal);
+            setPredictionResult(yVal);
+        } catch (err: any) {
+            addToast('Prediction failed: ' + err.message, 'error');
+        }
     };
 
     return (
@@ -2365,104 +2805,236 @@ const ChartsSection = () => {
              </div>
              
              {modelType === 'lr' && (
-                 <>
-                    <div>
-                      <label className="input-label block mb-1">Feature (X Variable)</label>
-                      <select className="premium-input premium-select w-full" value={xCol} onChange={e=>setXCol(e.target.value)}>
-                          {numericCols.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="input-label block mb-1">Target (Y Variable)</label>
-                      <select className="premium-input premium-select w-full" value={yCol} onChange={e=>setYCol(e.target.value)}>
-                          {numericCols.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                 </>
+                  <>
+                     <div>
+                       <label className="input-label block mb-1">Feature (X Variable)</label>
+                       <select className="premium-input premium-select w-full" value={xCol} onChange={e=>setXCol(e.target.value)}>
+                           {numericCols.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                       </select>
+                     </div>
+                     <div>
+                       <label className="input-label block mb-1">Target (Y Variable)</label>
+                       <select className="premium-input premium-select w-full" value={yCol} onChange={e=>setYCol(e.target.value)}>
+                           {numericCols.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+                       </select>
+                     </div>
+                     <div>
+                       <label className="input-label block mb-1">Train/Test Split ({trainSplit}%)</label>
+                       <input 
+                         type="range" 
+                         min="50" 
+                         max="90" 
+                         step="5"
+                         value={trainSplit} 
+                         onChange={e=>setTrainSplit(parseInt(e.target.value))} 
+                         className="ml-slider mt-2 w-full" 
+                       />
+                       <div className="flex justify-between text-[10px] text-muted mt-1">
+                          <span>Train: {trainSplit}%</span>
+                          <span>Test: {100 - trainSplit}%</span>
+                       </div>
+                     </div>
+                  </>
              )}
              {modelType === 'kmeans' && (
-                 <>
-                    <div>
-                      <label className="input-label block mb-1">Number of Clusters (K)</label>
-                      <input type="range" min="2" max="10" defaultValue="3" className="ml-slider mt-2" />
-                      <div className="text-right text-xs text-muted mt-1">3 Clusters</div>
-                    </div>
-                 </>
+                  <>
+                     <div>
+                       <label className="input-label block mb-1">Number of Clusters (K)</label>
+                       <input 
+                         type="range" 
+                         min="2" 
+                         max="10" 
+                         value={kClusters} 
+                         onChange={e=>setKClusters(parseInt(e.target.value))} 
+                         className="ml-slider mt-2 w-full" 
+                       />
+                       <div className="text-right text-xs text-muted mt-1">{kClusters} Clusters</div>
+                     </div>
+                     <div className="mt-2">
+                       <label className="input-label block mb-2">Select Features (Numeric Columns)</label>
+                       <div className="flex flex-col gap-2 max-h-48 overflow-y-auto border border-[var(--border)] p-3 rounded-lg bg-[var(--surface-light)]">
+                           {numericCols.map(col => {
+                               const isChecked = kmeansCols.length === 0 ? true : kmeansCols.includes(col.name);
+                               return (
+                                 <label key={col.name} className="flex items-center gap-2 text-xs text-muted hover:text-white cursor-pointer py-1">
+                                    <input 
+                                       type="checkbox" 
+                                       checked={isChecked} 
+                                       onChange={(e) => {
+                                           const current = kmeansCols.length === 0 ? numericCols.map(c => c.name) : kmeansCols;
+                                           if (e.target.checked) {
+                                               setKmeansCols([...current, col.name]);
+                                           } else {
+                                               setKmeansCols(current.filter(c => c !== col.name));
+                                           }
+                                       }}
+                                       className="accent-[var(--primary)] w-3.5 h-3.5"
+                                    />
+                                    <span className="truncate">{col.name}</span>
+                                 </label>
+                               );
+                           })}
+                       </div>
+                       <div className="text-[10px] text-muted mt-1 font-mono">
+                          {kmeansCols.length === 0 ? numericCols.length : kmeansCols.length} features selected
+                       </div>
+                     </div>
+                  </>
              )}
              
              <div className="mt-auto">
-               <button className="btn-primary w-full justify-center" onClick={trainModel} disabled={training}>
-                 {training ? <span className="animate-pulse">Training...</span> : <><Zap size={16}/> Train Model</>}
-               </button>
+                <button className="btn-primary w-full justify-center" onClick={trainModel} disabled={training}>
+                  {training ? <span className="animate-pulse">Training...</span> : <><Zap size={16}/> Train Model</>}
+                </button>
              </div>
           </div>
-          <div className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-xl p-8 flex flex-col overflow-y-auto hidden-scrollbar">
+          <div className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 flex flex-col overflow-y-auto hidden-scrollbar">
              {result ? (
-                 <div className="fade-in">
-                    <div className="flex justify-between items-center mb-6">
-                        <h2>Model Results</h2>
-                        <span className="text-xs bg-[var(--success)] text-black px-2 py-1 rounded font-bold uppercase tracking-wider">Ready</span>
-                    </div>
-                    
-                    {result.type === 'lr' && (
-                        <div className="grid grid-cols-3 gap-4 mb-6">
-                           <div className="premium-card p-6 text-center shadow-lg border-t-2 border-t-[var(--primary)]">
-                              <div className="text-4xl font-mono text-white mb-2">{result.r2.toFixed(3)}</div>
-                              <div className="text-xs text-muted uppercase tracking-wider font-semibold">R² Score</div>
-                           </div>
-                           <div className="premium-card p-6 text-center">
-                              <div className="text-4xl font-mono text-[var(--success)] mb-2">{result.m.toFixed(3)}</div>
-                              <div className="text-xs text-muted uppercase tracking-wider font-semibold">Coefficient</div>
-                           </div>
-                           <div className="premium-card p-6 text-center">
-                              <div className="text-4xl font-mono text-[var(--warning)] mb-2">{result.b.toFixed(3)}</div>
-                              <div className="text-xs text-muted uppercase tracking-wider font-semibold">Intercept</div>
-                           </div>
-                        </div>
-                    )}
-                    
-                    {result.type === 'kmeans' && (
-                         <div className="grid grid-cols-3 gap-4 mb-6">
-                           <div className="premium-card p-6 text-center shadow-lg border-t-2 border-t-[var(--primary)]">
-                              <div className="text-4xl font-mono text-white mb-2">{result.k}</div>
-                              <div className="text-xs text-muted uppercase tracking-wider font-semibold">Clusters</div>
-                           </div>
-                           <div className="premium-card p-6 text-center">
-                              <div className="text-4xl font-mono text-[var(--success)] mb-2">{result.silhouette.toFixed(2)}</div>
-                              <div className="text-xs text-muted uppercase tracking-wider font-semibold">Silhouette Score</div>
-                           </div>
-                           <div className="premium-card p-6 text-center">
-                              <div className="text-4xl font-mono text-[var(--warning)] mb-2">{result.inertia.toFixed(1)}</div>
-                              <div className="text-xs text-muted uppercase tracking-wider font-semibold">Inertia</div>
-                           </div>
-                        </div>
-                    )}
+                  <div className="fade-in flex flex-col gap-6">
+                     <div className="flex justify-between items-center">
+                         <h2>Model Results ({result.type === 'lr' ? 'Regression' : 'K-Means'})</h2>
+                         <span className="text-xs bg-[var(--success)] text-black px-2 py-1 rounded font-bold uppercase tracking-wider">Ready</span>
+                     </div>
+                     
+                     {result.type === 'lr' && (
+                         <>
+                            <div className="grid grid-cols-3 gap-4">
+                               <div className="premium-card p-4 text-center shadow-lg border-t-2 border-t-[var(--primary)]">
+                                  <div className="text-3xl font-mono text-white mb-1">{result.testR2.toFixed(4)}</div>
+                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Test R² Score</div>
+                                  <div className="text-[9px] text-[var(--primary)] font-mono mt-1">Train R²: {result.trainR2.toFixed(4)}</div>
+                               </div>
+                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--success)]">
+                                  <div className="text-3xl font-mono text-[var(--success)] mb-1">{result.testMse.toFixed(2)}</div>
+                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Test MSE</div>
+                                  <div className="text-[9px] text-[var(--success)] font-mono mt-1">Train MSE: {result.trainMse.toFixed(2)}</div>
+                               </div>
+                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--warning)]">
+                                  <div className="text-3xl font-mono text-[var(--warning)] mb-1">{result.testMae.toFixed(2)}</div>
+                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Test MAE</div>
+                                  <div className="text-[9px] text-[var(--warning)] font-mono mt-1">Train MAE: {result.trainMae.toFixed(2)}</div>
+                               </div>
+                            </div>
 
-                    <div className="h-64 mt-4 p-8 bg-[rgba(7,11,20,0.5)] border border-[var(--border)] rounded-xl relative overflow-hidden flex items-center justify-center">
-                       {/* Background Grid */}
-                       <div className="absolute inset-0" style={{backgroundImage: 'linear-gradient(to right, #1E2D3D 1px, transparent 1px), linear-gradient(to bottom, #1E2D3D 1px, transparent 1px)', backgroundSize: '40px 40px', opacity: 0.2}}></div>
-                       <div className="z-10 text-center">
-                          {result.type === 'lr' && (
-                             <div className="font-mono text-2xl text-[var(--primary)] bg-[rgba(0,0,0,0.5)] p-4 rounded-xl border border-[var(--border)] shadow-xl">
-                                y = {result.m.toFixed(4)}x + {result.b.toFixed(4)}
-                             </div>
-                          )}
-                          {result.type === 'kmeans' && (
-                             <div className="font-mono text-xl text-[var(--success)] flex gap-4">
-                               <div className="w-8 h-8 rounded-full bg-[var(--primary)]"></div>
-                               <div className="w-8 h-8 rounded-full bg-[var(--success)]"></div>
-                               <div className="w-8 h-8 rounded-full bg-[var(--warning)]"></div>
-                             </div>
-                          )}
-                       </div>
-                    </div>
-                 </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                               <div className="premium-card p-5 flex flex-col justify-center">
+                                  <h3 className="text-sm font-semibold mb-2">Linear Regression Formula</h3>
+                                  <div className="font-mono text-xl text-[var(--primary)] bg-[rgba(0,0,0,0.3)] p-4 rounded-lg border border-[var(--border)] text-center">
+                                     y = {result.m.toFixed(4)}x + {result.b.toFixed(4)}
+                                  </div>
+                                  <div className="text-[10px] text-muted mt-2">
+                                     Intercept (b): {result.b.toFixed(6)} <br/>
+                                     Slope (m): {result.m.toFixed(6)}
+                                  </div>
+                                </div>
+
+                               <div className="premium-card p-5">
+                                  <h3 className="text-sm font-semibold mb-3">Make a Prediction</h3>
+                                  <form onSubmit={handlePredict} className="flex gap-2">
+                                     <input 
+                                        type="number" 
+                                        step="any"
+                                        placeholder={`Enter ${result.xLabel}...`}
+                                        value={predictionInput}
+                                        onChange={e=>setPredictionInput(e.target.value)}
+                                        className="premium-input flex-1 text-sm h-9"
+                                     />
+                                     <button type="submit" className="btn-primary h-9 text-xs">Predict</button>
+                                  </form>
+                                  {predictionResult !== null && (
+                                     <div className="mt-3 p-3 bg-[var(--surface-light)] border border-[var(--border)] rounded-lg flex justify-between items-center">
+                                        <span className="text-xs text-muted">Predicted {result.yLabel}:</span>
+                                        <span className="font-mono text-sm font-bold text-[var(--success)]">{predictionResult.toFixed(4)}</span>
+                                     </div>
+                                  )}
+                               </div>
+                            </div>
+
+                            <div className="premium-card p-5">
+                               <h3 className="text-sm font-semibold mb-2">Residuals Plot (Residuals vs Fitted Values)</h3>
+                               <p className="text-[10px] text-muted mb-4">Ideally, points should be randomly scattered around the horizontal axis y=0.</p>
+                               <div className="h-64 w-full">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                     <ScatterChart margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
+                                        <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
+                                        <XAxis type="number" dataKey="predicted" name="Fitted Values" tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} label={{ value: 'Fitted Values', position: 'bottom', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
+                                        <YAxis type="number" dataKey="residual" name="Residual" tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} label={{ value: 'Residual', angle: -90, position: 'left', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
+                                        <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} />
+                                        <Scatter name="Residuals" data={result.residuals} fill="#EF4444" />
+                                     </ScatterChart>
+                                  </ResponsiveContainer>
+                               </div>
+                            </div>
+                         </>
+                     )}
+                     
+                     {result.type === 'kmeans' && (
+                         <>
+                            <div className="grid grid-cols-3 gap-4">
+                               <div className="premium-card p-4 text-center shadow-lg border-t-2 border-t-[var(--primary)]">
+                                  <div className="text-3xl font-mono text-white mb-1">{result.k}</div>
+                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">K Clusters</div>
+                               </div>
+                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--success)]">
+                                  <div className="text-3xl font-mono text-[var(--success)] mb-1">{result.silhouette.toFixed(3)}</div>
+                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Silhouette Score</div>
+                               </div>
+                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--warning)]">
+                                  <div className="text-3xl font-mono text-[var(--warning)] mb-1">{result.inertia.toFixed(1)}</div>
+                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Total Inertia</div>
+                               </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                               <div className="premium-card p-5 flex flex-col">
+                                  <h3 className="text-sm font-semibold mb-2">Cluster Visualization</h3>
+                                  <p className="text-[10px] text-muted mb-4">
+                                     {result.isPCA 
+                                       ? "Multi-dimensional features projected to 2D using Principal Component Analysis (PCA)." 
+                                       : `Scatter plot of ${result.xLabel} vs ${result.yLabel} colored by cluster.`}
+                                  </p>
+                                  <div className="h-64 w-full">
+                                     <ResponsiveContainer width="100%" height="100%">
+                                        <ScatterChart margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
+                                           <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" />
+                                           <XAxis type="number" dataKey="x" name={result.xLabel} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} label={{ value: result.xLabel, position: 'bottom', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
+                                           <YAxis type="number" dataKey="y" name={result.yLabel} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} label={{ value: result.yLabel, angle: -90, position: 'left', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
+                                           <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} />
+                                           <Scatter name="Datapoints" data={result.plotData}>
+                                              {result.plotData.map((entry: any, index: number) => (
+                                                <Cell key={`cell-${index}`} fill={CHART_COLORS[entry.cluster % CHART_COLORS.length]} />
+                                              ))}
+                                           </Scatter>
+                                        </ScatterChart>
+                                     </ResponsiveContainer>
+                                  </div>
+                               </div>
+
+                               <div className="premium-card p-5 flex flex-col">
+                                  <h3 className="text-sm font-semibold mb-2">Elbow Method (K vs Inertia)</h3>
+                                  <p className="text-[10px] text-muted mb-4">The "elbow" point is where the rate of decrease in inertia slows down significantly.</p>
+                                  <div className="h-64 w-full">
+                                     <ResponsiveContainer width="100%" height="100%">
+                                        <LineChart data={result.elbowData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
+                                           <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
+                                           <XAxis dataKey="k" tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} label={{ value: 'Clusters (K)', position: 'bottom', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
+                                           <YAxis tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} label={{ value: 'Inertia', angle: -90, position: 'left', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
+                                           <RechartsTooltip />
+                                           <Line type="monotone" dataKey="inertia" stroke="#6366F1" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                                        </LineChart>
+                                     </ResponsiveContainer>
+                                  </div>
+                               </div>
+                            </div>
+                         </>
+                     )}
+                  </div>
              ) : (
-                 <div className="flex-1 flex flex-col items-center justify-center text-muted">
-                    <Network size={64} className="opacity-10 mb-4" />
-                    <div className="text-lg">Machine Learning Lab</div>
-                    <div className="text-sm opacity-60">Select configuration and train model to see evaluation</div>
-                 </div>
+                  <div className="flex-1 flex flex-col items-center justify-center text-muted">
+                     <Network size={64} className="opacity-10 mb-4" />
+                     <div className="text-lg">Machine Learning Lab</div>
+                     <div className="text-sm opacity-60">Select configuration and train model to see evaluation</div>
+                  </div>
              )}
           </div>
        </div>
