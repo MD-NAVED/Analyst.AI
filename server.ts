@@ -15,20 +15,52 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(cors());
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const apiKey = process.env.GEMINI_API_KEY;
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 app.post('/api/analyze', async (req, res) => {
   try {
+    if (!ai) {
+      return res.status(400).json({ 
+        error: 'Gemini API Key is missing. Please create a .env file in the project root containing GEMINI_API_KEY="your_actual_api_key" and restart the server.' 
+      });
+    }
+
     const { prompt, contents } = req.body;
     let finalPrompt = prompt || '';
     if (contents) {
         finalPrompt = `${finalPrompt}\n\nData Context:\n${JSON.stringify(contents)}`;
     }
     
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: finalPrompt,
-    });
+    const modelsToTry = [
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-2.0-flash',
+      'gemini-flash-latest',
+      'gemini-2.0-flash-lite'
+    ];
+    let response;
+    let lastError: any = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`Attempting analysis with model: ${modelName}...`);
+        response = await ai.models.generateContent({
+            model: modelName,
+            contents: finalPrompt,
+        });
+        console.log(`Analysis successfully completed using model: ${modelName}`);
+        break;
+      } catch (apiError: any) {
+        lastError = apiError;
+        const errorMsg = apiError.message || '';
+        console.warn(`Model ${modelName} failed. Error: ${errorMsg.slice(0, 150)}...`);
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error('All candidate Gemini models failed to generate content.');
+    }
     
     res.json({ text: response.text });
   } catch (error: any) {

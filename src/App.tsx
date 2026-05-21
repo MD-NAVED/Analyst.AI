@@ -14,13 +14,16 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis, AreaChart, Area
 } from 'recharts';
-import { GoogleGenAI } from '@google/genai';
 import { saveSession, loadSession, clearSession, getStorageEstimate } from './lib/db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import alasql from 'alasql';
 import { SimpleLinearRegression } from 'ml-regression-simple-linear';
 import { kmeans } from 'ml-kmeans';
+import GridLayout, { WidthProvider } from 'react-grid-layout/legacy';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
+
 
 // --- TYPES ---
 interface ErrorBoundaryProps {
@@ -119,6 +122,19 @@ interface ToastInfo {
   id: number;
   message: string;
   type: 'success' | 'error' | 'warning' | 'info';
+}
+
+interface WidgetConfig {
+  id: string;
+  title: string;
+  type: 'kpi' | 'line' | 'bar' | 'table' | 'markdown';
+  column?: string;
+  operation?: string;
+  xAxisColumn?: string;
+  yAxisColumn?: string;
+  tableColumns?: string[];
+  tableLimit?: number;
+  content?: string;
 }
 
 interface HistoryOp {
@@ -467,6 +483,8 @@ const calculateSilhouetteScore = (points: number[][], clusters: number[]): numbe
 };
 
 
+const ReactGridLayout = WidthProvider(GridLayout);
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'pivot' | 'eda' | 'chat' | 'sql' | 'ml' | 'dashboard' | 'pipeline' | 'auto-analyst'>('upload');
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
@@ -476,6 +494,35 @@ export default function App() {
   const [history, setHistory] = useState<HistoryOp[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
+
+  // Dashboard Builder States
+  const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
+  const [dashboardLayout, setDashboardLayout] = useState<any[]>([]);
+  const [isEditMode, setIsEditMode] = useState<boolean>(true);
+  const [isWidgetModalOpen, setIsWidgetModalOpen] = useState<boolean>(false);
+  const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
+
+  const [widgetForm, setWidgetForm] = useState<{
+    type: 'kpi' | 'line' | 'bar' | 'table' | 'markdown';
+    title: string;
+    column: string;
+    operation: string;
+    xAxisColumn: string;
+    yAxisColumn: string;
+    tableColumns: string[];
+    tableLimit: number;
+    content: string;
+  }>({
+    type: 'kpi',
+    title: '',
+    column: '',
+    operation: 'sum',
+    xAxisColumn: '',
+    yAxisColumn: '',
+    tableColumns: [],
+    tableLimit: 5,
+    content: ''
+  });
   const [loading, setLoading] = useState(false);
   const [parseProgress, setParseProgress] = useState({ percent: 0, stage: '', rows: 0, elapsed: 0, eta: 0 });
   const abortControllerRef = useRef<(() => void) | null>(null);
@@ -522,6 +569,7 @@ export default function App() {
   const [autoPilotInsights, setAutoPilotInsights] = useState<string[]>([]);
   const [autoPilotCharts, setAutoPilotCharts] = useState<any[]>([]);
   const [autoPilotReport, setAutoPilotReport] = useState<any>(null);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
   
   const triggerSaveSession = useCallback(async () => {
     if ((showRestoreSession && !hasRestored) || (!data.length && !initialData.length)) return;
@@ -763,6 +811,383 @@ STRICT RULES:
     }
   };
 
+  const exportReportToPDF = async () => {
+    if (!autoPilotReport) return;
+    setIsExportingPDF(true);
+    addToast("Preparing enterprise PDF report...", "info");
+
+    // Wait for React to re-render without animations
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    try {
+      const blueprint = document.createElement('div');
+      blueprint.id = 'auto-analyst-report';
+      blueprint.className = 'pdf-blueprint';
+      document.body.appendChild(blueprint);
+
+      // Apply inline styles to force a standard printable layout width before capturing
+      blueprint.style.width = '800px';
+      blueprint.style.boxSizing = 'border-box';
+
+      const filename = fileInfo?.name || "dataset.csv";
+      const dateStr = new Date().toLocaleDateString(undefined, {
+        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+
+      blueprint.innerHTML = `
+        <div class="pdf-page whitespace-normal break-words word-break-break-all" id="pdf-page-1">
+          <div class="pdf-cover-page whitespace-normal break-words word-break-break-all">
+            <div class="whitespace-normal break-words word-break-break-all">
+              <div class="pdf-cover-accent-bar"></div>
+              <h1 class="pdf-cover-title whitespace-normal break-words word-break-break-all">DataLens AI</h1>
+              <h2 class="pdf-cover-subtitle whitespace-normal break-words word-break-break-all">Executive Analytics & Data Insights Report</h2>
+            </div>
+            <div class="whitespace-normal break-words word-break-break-all">
+              <div class="pdf-meta-box whitespace-normal break-words word-break-break-all">
+                <div class="pdf-meta-item whitespace-normal break-words word-break-break-all">
+                  <span class="pdf-meta-label whitespace-normal break-words word-break-break-all">Source Document</span>
+                  <span class="pdf-meta-value whitespace-normal break-words word-break-break-all">${filename}</span>
+                </div>
+                <div class="pdf-meta-item whitespace-normal break-words word-break-break-all">
+                  <span class="pdf-meta-label whitespace-normal break-words word-break-break-all">Generated On</span>
+                  <span class="pdf-meta-value whitespace-normal break-words word-break-break-all">${dateStr}</span>
+                </div>
+                <div class="pdf-meta-item whitespace-normal break-words word-break-break-all">
+                  <span class="pdf-meta-label whitespace-normal break-words word-break-break-all">Data Format</span>
+                  <span class="pdf-meta-value whitespace-normal break-words word-break-break-all">${filename.split('.').pop()?.toUpperCase() || 'CSV'}</span>
+                </div>
+              </div>
+              <div class="pdf-metrics-grid whitespace-normal break-words word-break-break-all">
+                <div class="pdf-metric-card whitespace-normal break-words word-break-break-all">
+                  <div class="pdf-metric-value whitespace-normal break-words word-break-break-all">${autoPilotReport.data_quality_score || 100}/100</div>
+                  <div class="pdf-metric-label whitespace-normal break-words word-break-break-all">Data Health Score</div>
+                </div>
+                <div class="pdf-metric-card whitespace-normal break-words word-break-break-all">
+                  <div class="pdf-metric-value whitespace-normal break-words word-break-break-all">${data.length.toLocaleString()}</div>
+                  <div class="pdf-metric-label whitespace-normal break-words word-break-break-all">Total Rows Analyzed</div>
+                </div>
+              </div>
+            </div>
+            <div class="whitespace-normal break-words word-break-break-all" style="font-size: 10px; color: #94a3b8; font-weight: 500;">
+              CONFIDENTIAL • FOR INTERNAL USE ONLY
+            </div>
+          </div>
+        </div>
+
+        <div class="pdf-page whitespace-normal break-words word-break-break-all" id="pdf-page-2">
+          <div class="pdf-header whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">DataLens AI | Executive Report</span>
+            <span class="whitespace-normal break-words word-break-break-all">Table of Contents</span>
+          </div>
+          <div class="pdf-content whitespace-normal break-words word-break-break-all">
+            <h2 class="pdf-section-title whitespace-normal break-words word-break-break-all" style="margin-top: 40px; margin-bottom: 50px;">Table of Contents</h2>
+            <div class="whitespace-normal break-words word-break-break-all" style="margin-bottom: 20px;">
+              <div class="pdf-toc-item whitespace-normal break-words word-break-break-all">
+                <span class="pdf-toc-title whitespace-normal break-words word-break-break-all">1. Executive Summary</span>
+                <span class="pdf-toc-dots"></span>
+                <span class="pdf-toc-page whitespace-normal break-words word-break-break-all">Page 3</span>
+              </div>
+              <div class="pdf-toc-item whitespace-normal break-words word-break-break-all">
+                <span class="pdf-toc-title whitespace-normal break-words word-break-break-all">2. Key Analytical Insights</span>
+                <span class="pdf-toc-dots"></span>
+                <span class="pdf-toc-page whitespace-normal break-words word-break-break-all">Page 3</span>
+              </div>
+              <div class="pdf-toc-item whitespace-normal break-words word-break-break-all">
+                <span class="pdf-toc-title whitespace-normal break-words word-break-break-all">3. Data Visualizations & Charts</span>
+                <span class="pdf-toc-dots"></span>
+                <span class="pdf-toc-page whitespace-normal break-words word-break-break-all">Page 4</span>
+              </div>
+              <div class="pdf-toc-item whitespace-normal break-words word-break-break-all">
+                <span class="pdf-toc-title whitespace-normal break-words word-break-break-all">4. Strategic Business Recommendations</span>
+                <span class="pdf-toc-dots"></span>
+                <span class="pdf-toc-recommendations-page pdf-toc-page whitespace-normal break-words word-break-break-all">Page 5</span>
+              </div>
+            </div>
+          </div>
+          <div class="pdf-footer whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">${filename}</span>
+            <span class="pdf-page-number-text whitespace-normal break-words word-break-break-all">Page 2 of 5</span>
+          </div>
+        </div>
+
+        <div class="pdf-page whitespace-normal break-words word-break-break-all" id="pdf-page-3">
+          <div class="pdf-header whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">DataLens AI | Executive Report</span>
+            <span class="whitespace-normal break-words word-break-break-all">Executive Summary & Insights</span>
+          </div>
+          <div class="pdf-content whitespace-normal break-words word-break-break-all">
+            <h2 class="pdf-section-title whitespace-normal break-words word-break-break-all">1. Executive Summary</h2>
+            <p class="pdf-body-text whitespace-normal break-words word-break-break-all" style="margin-bottom: 30px;">
+              ${(autoPilotReport.executive_summary || '').replace(/\n/g, '<br/>')}
+            </p>
+            
+            <h2 class="pdf-section-title whitespace-normal break-words word-break-break-all" style="margin-top: 20px;">2. Key Analytical Insights</h2>
+            <div class="whitespace-normal break-words word-break-break-all" style="display: flex; flex-direction: column; gap: 12px;">
+              ${(autoPilotInsights || []).map((insight, idx) => `
+                <div class="pdf-insight-row whitespace-normal break-words word-break-break-all" style="display: flex; align-items: flex-start;">
+                  <div class="pdf-insight-badge whitespace-normal break-words word-break-break-all" style="display: inline-block !important; width: 24px !important; height: 24px !important; line-height: 24px !important; text-align: center !important; font-size: 12px !important; font-weight: bold !important; padding: 0 !important; margin: 0 !important; border-radius: 50% !important; flex-shrink: 0 !important;">${idx + 1}</div>
+                  <div class="whitespace-normal break-words word-break-break-all" style="font-size: 12px; line-height: 1.5; color: #334155; font-weight: 500; flex: 1; min-width: 0;">
+                    ${insight}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="pdf-footer whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">${filename}</span>
+            <span class="pdf-page-number-text whitespace-normal break-words word-break-break-all">Page 3 of 5</span>
+          </div>
+        </div>
+
+
+        <div class="pdf-page whitespace-normal break-words word-break-break-all" id="pdf-page-5">
+          <div class="pdf-header whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">DataLens AI | Executive Report</span>
+            <span class="whitespace-normal break-words word-break-break-all">Business Recommendations</span>
+          </div>
+          <div class="pdf-content whitespace-normal break-words word-break-break-all">
+            <h2 class="pdf-section-title whitespace-normal break-words word-break-break-all">4. Strategic Recommendations</h2>
+            <p class="pdf-body-text whitespace-normal break-words word-break-break-all">
+              Based on the statistical properties of the dataset and the generated key insights, the following strategic path is recommended:
+            </p>
+            <div class="pdf-recommendation-box whitespace-normal break-words word-break-break-all">
+              <div class="whitespace-normal break-words word-break-break-all" style="font-weight: 700; font-size: 13px; margin-bottom: 8px; color: #0f5132;">
+                Strategic Guidance
+              </div>
+              ${(autoPilotReport.business_recommendation || '').replace(/\n/g, '<br/>')}
+            </div>
+          </div>
+          <div class="pdf-footer whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">${filename}</span>
+            <span class="pdf-page-number-text whitespace-normal break-words word-break-break-all">Page 5 of 5</span>
+          </div>
+        </div>
+      `;
+
+      // Build the first charts page dynamically (avoids blank section-heading page)
+      let chartPageCount = 1;
+      const makeChartsPage = (pageCount: number, isFirst: boolean) => {
+        const newPage = document.createElement('div');
+        newPage.className = 'pdf-page whitespace-normal break-words word-break-break-all';
+        newPage.id = `pdf-page-charts-${pageCount}`;
+        newPage.innerHTML = `
+          <div class="pdf-header whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">DataLens AI | Executive Report</span>
+            <span class="whitespace-normal break-words word-break-break-all">Data Visualizations${isFirst ? '' : ' (Cont.)'}</span>
+          </div>
+          <div class="pdf-content whitespace-normal break-words word-break-break-all">
+            ${isFirst ? '<h2 class="pdf-section-title whitespace-normal break-words word-break-break-all" style="margin-bottom: 20px;">3. Data Visualizations</h2>' : ''}
+            <div class="pdf-chart-container whitespace-normal break-words word-break-break-all" id="pdf-charts-target-${pageCount}">
+            </div>
+          </div>
+          <div class="pdf-footer whitespace-normal break-words word-break-break-all">
+            <span class="whitespace-normal break-words word-break-break-all">${filename}</span>
+            <span class="pdf-page-number-text whitespace-normal break-words word-break-break-all">Page X</span>
+          </div>
+        `;
+        const recPage = blueprint.querySelector('#pdf-page-5');
+        if (recPage) blueprint.insertBefore(newPage, recPage);
+        else blueprint.appendChild(newPage);
+        return newPage;
+      };
+
+      let currentChartsPage = makeChartsPage(chartPageCount, true);
+      let currentChartsTarget = currentChartsPage.querySelector(`#pdf-charts-target-${chartPageCount}`) as HTMLElement;
+
+      for (let i = 0; i < autoPilotCharts.length; i++) {
+        const activeChartEl = document.getElementById(`auto-chart-${i}`);
+        if (activeChartEl && currentChartsTarget) {
+          const remCharts = autoPilotCharts.length - i;
+          const contentArea = currentChartsPage.querySelector('.pdf-content') as HTMLElement;
+          const occupiedHeight = contentArea ? contentArea.scrollHeight : 0;
+          const remainingSpace = 880 - occupiedHeight;
+
+          let targetChartHeight = 360;
+          let useCompression = false;
+
+          if (remCharts === 1 && remainingSpace >= 520) {
+            targetChartHeight = 460;
+            useCompression = false;
+          } else if (remCharts * 420 <= remainingSpace) {
+            targetChartHeight = 360;
+            useCompression = false;
+          } else if (remCharts * 270 <= remainingSpace) {
+            targetChartHeight = 220;
+            useCompression = true;
+          } else {
+            targetChartHeight = 360;
+            useCompression = false;
+          }
+
+          const cloned = activeChartEl.cloneNode(true) as HTMLDivElement;
+          cloned.removeAttribute('id');
+          cloned.style.position = 'absolute';
+          cloned.style.left = '-9999px';
+          cloned.style.top = '0';
+          cloned.style.width = '800px';
+          cloned.style.height = `${targetChartHeight}px`;
+          cloned.style.backgroundColor = '#ffffff';
+          cloned.style.boxShadow = 'none';
+          cloned.style.border = 'none';
+          cloned.style.padding = '20px';
+          cloned.style.paddingBottom = '40px';
+          cloned.style.boxSizing = 'border-box';
+          
+          document.body.appendChild(cloned);
+          
+          const svgTexts = cloned.querySelectorAll('text');
+          svgTexts.forEach((text: any) => {
+            text.setAttribute('fill', '#475569');
+            text.style.fill = '#475569';
+            text.style.fontSize = '12px';
+          });
+
+          const svgGrids = cloned.querySelectorAll('.recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line');
+          svgGrids.forEach((line: any) => {
+            line.setAttribute('stroke', '#e2e8f0');
+            line.style.stroke = '#e2e8f0';
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 150));
+
+          const chartCanvas = await html2canvas(cloned, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            logging: false,
+            width: 800,
+            height: targetChartHeight
+          });
+
+          const chartDataUrl = chartCanvas.toDataURL('image/png');
+          cloned.remove();
+          
+          const chartItemDiv = document.createElement('div');
+          chartItemDiv.className = 'pdf-chart-item whitespace-normal break-words word-break-break-all';
+          chartItemDiv.style.width = '100%';
+          chartItemDiv.style.display = 'flex';
+          chartItemDiv.style.flexDirection = 'column';
+          chartItemDiv.style.pageBreakInside = 'avoid';
+          chartItemDiv.style.breakInside = 'avoid';
+          chartItemDiv.style.backgroundColor = '#ffffff';
+          chartItemDiv.style.border = '1px solid #e2e8f0';
+          chartItemDiv.style.borderRadius = '8px';
+          chartItemDiv.style.boxSizing = 'border-box';
+
+          if (useCompression) {
+            chartItemDiv.style.padding = '10px';
+            chartItemDiv.style.paddingBottom = '15px';
+            chartItemDiv.style.marginBottom = '10px';
+            chartItemDiv.style.maxHeight = `${targetChartHeight + 45}px`;
+          } else {
+            chartItemDiv.style.padding = '15px';
+            chartItemDiv.style.paddingBottom = '25px';
+            chartItemDiv.style.marginBottom = '20px';
+            chartItemDiv.style.maxHeight = `${targetChartHeight + 60}px`;
+          }
+
+          const chartTitle = document.createElement('div');
+          chartTitle.className = 'pdf-chart-title whitespace-normal break-words word-break-break-all';
+          chartTitle.style.fontWeight = 'bold';
+          chartTitle.style.color = '#1e293b';
+          chartTitle.style.textAlign = 'center';
+          chartTitle.innerText = autoPilotCharts[i].title;
+
+          if (useCompression) {
+            chartTitle.style.fontSize = '12px';
+            chartTitle.style.marginBottom = '6px';
+          } else {
+            chartTitle.style.fontSize = '14px';
+            chartTitle.style.marginBottom = '12px';
+          }
+
+          const img = document.createElement('img');
+          img.src = chartDataUrl;
+          img.style.width = '100%';
+          img.style.height = 'auto';
+          img.style.maxHeight = `${targetChartHeight}px`;
+          img.style.objectFit = 'contain';
+          img.style.display = 'block';
+
+          chartItemDiv.appendChild(chartTitle);
+          chartItemDiv.appendChild(img);
+          currentChartsTarget.appendChild(chartItemDiv);
+
+          const pageContentArea = currentChartsPage.querySelector('.pdf-content') as HTMLElement;
+          if (pageContentArea && pageContentArea.scrollHeight > 880) {
+            currentChartsTarget.removeChild(chartItemDiv);
+
+            chartPageCount++;
+            currentChartsPage = makeChartsPage(chartPageCount, false);
+            currentChartsTarget = currentChartsPage.querySelector(`#pdf-charts-target-${chartPageCount}`) as HTMLElement;
+            currentChartsTarget.appendChild(chartItemDiv);
+          }
+        }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const allPages = blueprint.querySelectorAll('.pdf-page');
+      const totalPages = allPages.length;
+
+      const tocRecPageEl = blueprint.querySelector('.pdf-toc-recommendations-page');
+      if (tocRecPageEl) {
+        tocRecPageEl.textContent = `Page ${totalPages}`;
+      }
+
+      allPages.forEach((pageEl, idx) => {
+        const pageNum = idx + 1;
+        const footerPageNumEl = pageEl.querySelector('.pdf-page-number-text');
+        if (footerPageNumEl) {
+          footerPageNumEl.textContent = `Page ${pageNum} of ${totalPages}`;
+        }
+      });
+
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'px',
+        format: 'a4'
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      for (let index = 0; index < allPages.length; index++) {
+        const pageEl = allPages[index] as HTMLElement;
+        const canvas = await html2canvas(pageEl, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+          width: 800
+        });
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        if (index > 0) {
+          doc.addPage();
+        }
+        doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+      }
+
+      const datasetName = fileInfo?.name 
+        ? fileInfo.name.replace(/\.[^/.]+$/, "").replace(/\s+/g, "_") 
+        : 'executive';
+      const formattedDate = new Date().toISOString().split('T')[0];
+      doc.save(`datalens_${datasetName}_report_${formattedDate}.pdf`);
+      addToast("PDF report generated successfully!", "success");
+    } catch (error: any) {
+      console.error("PDF Export Error:", error);
+      addToast(`Failed to export PDF: ${error.message || error}`, "error");
+    } finally {
+      const bp = document.getElementById('auto-analyst-report');
+      if (bp) {
+        bp.style.width = '';
+        bp.remove();
+      }
+      setIsExportingPDF(false);
+    }
+  };
+
   const AutoAnalystSection = () => {
     return (
       <div className="fade-in-up h-full flex flex-col p-4 bg-[var(--bg)] border border-[var(--border)] rounded-xl relative overflow-hidden">
@@ -774,13 +1199,26 @@ STRICT RULES:
               <h2>Auto-Analyst <Sparkles className="inline-block ml-2 text-[var(--primary)]" size={24}/></h2>
               <p className="text-muted mt-1">One-click data cleaning, insight generation, and visualization.</p>
            </div>
-           <button 
-               className="btn-primary" 
-               onClick={runFullAutomation}
-               disabled={autoPilotStatus !== 'idle' && autoPilotStatus !== 'done'}
-           >
-              <Wand2 size={16}/> {autoPilotStatus === 'idle' ? 'Magic Wand' : 'Rerun Auto-Pilot'}
-           </button>
+           <div className="flex gap-3">
+             {autoPilotStatus === 'done' && (
+               <button 
+                 className="btn-secondary flex items-center gap-2" 
+                 onClick={exportReportToPDF}
+                 disabled={isExportingPDF}
+                 aria-label="Export executive report as PDF"
+               >
+                 {isExportingPDF ? <RefreshCcw className="animate-spin" size={16}/> : <Download size={16}/>}
+                 Export PDF Report
+               </button>
+             )}
+             <button 
+                 className="btn-primary flex items-center gap-2" 
+                 onClick={runFullAutomation}
+                 disabled={autoPilotStatus !== 'idle' && autoPilotStatus !== 'done'}
+             >
+                <Wand2 size={16}/> {autoPilotStatus === 'idle' ? 'Magic Wand' : 'Rerun Auto-Pilot'}
+             </button>
+           </div>
         </div>
 
         {autoPilotStatus === 'idle' && (
@@ -813,8 +1251,8 @@ STRICT RULES:
 
         {autoPilotStatus === 'done' && (
            <div className="flex-1 overflow-y-auto hidden-scrollbar z-10 fade-in flex flex-col gap-6 p-2">
-              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 relative overflow-hidden mb-6">
-                 <div className="absolute top-0 left-0 w-1 h-full bg-[var(--primary)]"></div>
+              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 relative overflow-visible h-auto min-h-fit mb-6">
+                 <div className="absolute top-0 left-0 w-1 h-full bg-[var(--primary)] rounded-l-xl"></div>
                  <div className="flex justify-between items-start mb-4">
                      <h3 className="text-lg font-bold flex items-center gap-2"><Sparkles className="text-[var(--primary)]" size={18}/> Executive Summary</h3>
                      {autoPilotReport?.data_quality_score != null && (
@@ -831,9 +1269,9 @@ STRICT RULES:
                  <h4 className="font-semibold mb-3 flex items-center gap-2"><Activity size={16}/> Key Insights</h4>
                  <ul className="space-y-3 mb-6">
                     {autoPilotInsights.map((insight, idx) => (
-                       <li key={idx} className="flex gap-3 text-sm">
-                          <span className="text-[var(--primary)] font-bold">{idx + 1}.</span>
-                          <span>{insight}</span>
+                       <li key={idx} className="flex items-start gap-3 text-sm">
+                          <span className="rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] text-white shrink-0 select-none" style={{ display: 'inline-block', width: '24px', height: '24px', lineHeight: '24px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', padding: 0, margin: 0 }}>{idx + 1}</span>
+                          <span className="pt-0.5 leading-relaxed">{insight}</span>
                        </li>
                     ))}
                  </ul>
@@ -850,23 +1288,36 @@ STRICT RULES:
               
               <div className="grid grid-cols-2 gap-6">
                  {autoPilotCharts.map((cfg, idx) => {
-                    const chartData = data.slice(0, 100).map(d => ({
-                        [cfg.xAxis]: d[cfg.xAxis],
-                        [cfg.yAxis]: Number(d[cfg.yAxis])
-                    }));
+                    // Detect whether both axes are numeric (→ scatter) or categorical x (→ grouped bar/pie)
+                    const xColMeta = columns.find(c => c.name === cfg.xAxis);
+                    const yColMeta = columns.find(c => c.name === cfg.yAxis);
+                    const xIsNumeric = xColMeta?.type === 'number';
+                    const yIsNumeric = yColMeta?.type === 'number';
+
+                    // Aggregate: group by xAxis, compute mean yAxis
+                    const aggMap: Record<string, { sum: number; count: number }> = {};
+                    data.forEach(row => {
+                      const xKey = String(row[cfg.xAxis] ?? 'Unknown').trim();
+                      const yVal = Number(row[cfg.yAxis]);
+                      if (!isNaN(yVal)) {
+                        if (!aggMap[xKey]) aggMap[xKey] = { sum: 0, count: 0 };
+                        aggMap[xKey].sum += yVal;
+                        aggMap[xKey].count += 1;
+                      }
+                    });
+                    const aggregatedData = Object.entries(aggMap)
+                      .map(([key, { sum, count }]) => ({ [cfg.xAxis]: key, [cfg.yAxis]: parseFloat((sum / count).toFixed(2)) }))
+                      .sort((a, b) => (b[cfg.yAxis] as number) - (a[cfg.yAxis] as number))
+                      .slice(0, 20); // cap at 20 unique groups for readability
+
                     if (cfg.type === 'pie') {
-                       const agg: Record<string, number> = {};
-                       chartData.forEach((d: any) => {
-                           const key = String(d[cfg.xAxis.trim()] || 'Unknown');
-                           agg[key] = (agg[key] || 0) + (Number(d[cfg.yAxis.trim()]) || 0);
-                       });
-                       const pieData = Object.entries(agg).map(([name, value]) => ({name, value})).sort((a,b)=>b.value-a.value).slice(0, 5);
+                       const pieData = aggregatedData.map(d => ({ name: String(d[cfg.xAxis]), value: d[cfg.yAxis] as number })).slice(0, 7);
                        return (
-                          <div key={idx} className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6" style={{height: 350}}>
+                          <div id={`auto-chart-${idx}`} key={idx} className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6" style={{height: 350}}>
                              <h4 className="font-semibold mb-4 text-center">{cfg.title}</h4>
                              <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
-                                   <Pie data={pieData} cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={5} dataKey="value" nameKey="name" animationDuration={1500} animationEasing="ease-in-out">
+                                   <Pie data={pieData} cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={5} dataKey="value" nameKey="name" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out">
                                       {pieData.map((e,i) => <Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}
                                    </Pie>
                                    <RechartsTooltip content={<CustomTooltip />} />
@@ -876,22 +1327,62 @@ STRICT RULES:
                           </div>
                        );
                     }
+
+                    // Use scatter chart when both axes are numeric
+                    if (cfg.type === 'scatter' || (xIsNumeric && yIsNumeric)) {
+                      const scatterData = data.slice(0, 200).map(row => ({
+                        x: Number(row[cfg.xAxis]),
+                        y: Number(row[cfg.yAxis]),
+                      })).filter(d => !isNaN(d.x) && !isNaN(d.y));
+                      return (
+                        <div id={`auto-chart-${idx}`} key={idx} className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6" style={{height: 350}}>
+                          <h4 className="font-semibold mb-4 text-center">{cfg.title}</h4>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ScatterChart margin={{top:10, right:20, left:0, bottom:20}}>
+                              <defs>
+                                <linearGradient id={`autoScatterGrad${idx}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="#22D3EE" stopOpacity={0.9}/>
+                                  <stop offset="100%" stopColor="#6366F1" stopOpacity={0.9}/>
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" />
+                              <XAxis type="number" dataKey="x" name={cfg.xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke:'#1E2D3D'}} tickLine={false} label={{value: cfg.xAxis, position:'insideBottom', offset:-10, fill:'var(--text-muted)', fontSize:11}} />
+                              <YAxis type="number" dataKey="y" name={cfg.yAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+                              <RechartsTooltip content={<CustomTooltip />} cursor={{strokeDasharray:'3 3'}} />
+                              <Scatter data={scatterData} fill={`url(#autoScatterGrad${idx})`} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} />
+                            </ScatterChart>
+                          </ResponsiveContainer>
+                        </div>
+                      );
+                    }
+
+                    // Grouped bar chart for categorical x-axis
+                    const tickInterval = aggregatedData.length > 12 ? Math.ceil(aggregatedData.length / 10) : 0;
                     return (
-                        <div key={idx} className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6" style={{height: 350}}>
+                        <div id={`auto-chart-${idx}`} key={idx} className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6" style={{height: 350}}>
                            <h4 className="font-semibold mb-4 text-center">{cfg.title}</h4>
                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={chartData} layout={window.innerWidth < 768 ? "vertical" : "horizontal"} margin={{top:10, right:10, left:window.innerWidth < 768 ? 30 : 0, bottom:20}}>
+                              <BarChart data={aggregatedData} layout="horizontal" margin={{top:10, right:10, left:0, bottom: aggregatedData.length > 8 ? 40 : 20}}>
                                  <defs>
-                                   <linearGradient id="autoBarGradient" x1="0" y1="0" x2="0" y2="1">
+                                   <linearGradient id={`autoBarGrad${idx}`} x1="0" y1="0" x2="0" y2="1">
                                      <stop offset="0%" stopColor="#22D3EE" stopOpacity={1}/>
                                      <stop offset="100%" stopColor="#6366F1" stopOpacity={1}/>
                                    </linearGradient>
                                  </defs>
-                                 <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={window.innerWidth >= 768} horizontal={window.innerWidth < 768} />
-                                 <XAxis dataKey={window.innerWidth < 768 ? cfg.yAxis : cfg.xAxis} type={window.innerWidth < 768 ? "number" : "category"} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
-                                 <YAxis dataKey={window.innerWidth < 768 ? cfg.xAxis : undefined} type={window.innerWidth < 768 ? "category" : "number"} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+                                 <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
+                                 <XAxis
+                                   dataKey={cfg.xAxis}
+                                   type="category"
+                                   tick={{fill: 'var(--text-muted)', fontSize: aggregatedData.length > 8 ? 9 : 11}}
+                                   axisLine={{stroke: '#1E2D3D'}}
+                                   tickLine={false}
+                                   interval={tickInterval}
+                                   angle={aggregatedData.length > 8 ? -30 : 0}
+                                   textAnchor={aggregatedData.length > 8 ? 'end' : 'middle'}
+                                 />
+                                 <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
                                  <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
-                                 <Bar dataKey={cfg.yAxis} fill="url(#autoBarGradient)" radius={window.innerWidth < 768 ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={32} animationDuration={1500} animationEasing="ease-in-out" />
+                                 <Bar dataKey={cfg.yAxis} fill={`url(#autoBarGrad${idx})`} radius={[4, 4, 0, 0]} barSize={aggregatedData.length > 10 ? 18 : 32} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
                               </BarChart>
                            </ResponsiveContainer>
                         </div>
@@ -927,7 +1418,6 @@ STRICT RULES:
           setParseProgress({ percent: Math.min(100, Math.round(percent)), stage, rows, elapsed, eta });
       };
 
-      // Check for binary by reading a small chunk and looking for null bytes
       if (['csv', 'json'].includes(extension || '')) {
          const previewChunk = await file.slice(0, 4096).text();
          if (/\x00/.test(previewChunk)) {
@@ -966,12 +1456,10 @@ STRICT RULES:
                  const now = Date.now();
                  if (now - lastUpdate > 100) {
                      lastUpdate = now;
-                     // results.meta.cursor gives the byte index
                      const percent = (results.meta.cursor / file.size) * 100;
                      updateProgress('Parsing data...', percent, rows.length);
                  }
 
-                 // Hard limits check
                  if (rows.length > 500000) {
                      parser.abort();
                      reject(new Error(`File validation failed: Contains ${rows.length.toLocaleString()} rows, exceeding the max limit of 500,000.`));
@@ -995,7 +1483,6 @@ STRICT RULES:
         
         updateProgress('Parsing JSON structure...', 50, 0);
         
-        // Yield to let UI update
         await new Promise(r => setTimeout(r, 50));
         
         parsedData = JSON.parse(text);
@@ -1040,23 +1527,20 @@ STRICT RULES:
         throw new Error(`File validation failed: Contains ${keys.length.toLocaleString()} columns, exceeding the max limit of 500.`);
       }
 
-      // Validations: injection & strict mode
       for (let i = 0; i < parsedData.length; i++) {
         const row = parsedData[i];
         for (let j = 0; j < keys.length; j++) {
            const key = keys[j];
            const val = row[key];
            
-           // Strict mode check
            if (strictMode) {
                if (val === null || val === undefined || val === '') {
                    throw new Error(`Strict mode validation failed: Null or empty string found at row ${i+1}, column '${key}'.`);
                }
            }
 
-           // CSV injection check
-           if (typeof val === 'string' && /^[=+\-@]/.test(val.trim())) {
-               throw new Error(`Security validation failed: Potential CSV injection (formula starting with =, +, -, @) detected at row ${i+1}, column '${key}'.`);
+           if (typeof val === 'string' && /^=|^[+\-@][A-Za-z_]+\(/.test(val.trim())) {
+               throw new Error(`Security validation failed: Potential CSV injection (formula starting with = or function call with +, -, @) detected at row ${i+1}, column '${key}'.`);
            }
         }
       }
@@ -1088,8 +1572,6 @@ STRICT RULES:
       setLoading(false);
     }
   };
-
-  // --- SUBCOMPONENTS ---
 
   const UploadSection = () => {
     const [isDragging, setIsDragging] = useState(false);
@@ -1771,10 +2253,10 @@ STRICT RULES:
     const downloadPDF = async () => {
         const element = document.getElementById('eda-report');
         if (!element) return;
+        setIsExportingPDF(true);
         addToast('Generating high-quality multi-page PDF...', 'info');
         
-        // Wait for rendering to settle
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await new Promise(resolve => setTimeout(resolve, 300));
         
         try {
             const canvas = await html2canvas(element, { 
@@ -1802,12 +2284,17 @@ STRICT RULES:
                 heightLeft -= pageHeight;
             }
             
-            const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
-            pdf.save(`${filePrefix}_eda.pdf`);
+            const datasetName = fileInfo?.name 
+                ? fileInfo.name.replace(/\.[^/.]+$/, "").replace(/\s+/g, "_") 
+                : 'dataset';
+            const formattedDate = new Date().toISOString().split('T')[0]; 
+            pdf.save(`datalens_${datasetName}_eda_${formattedDate}.pdf`);
             addToast('Exported PDF successfully', 'success');
         } catch (e) {
             console.error(e);
             addToast('Export failed', 'error');
+        } finally {
+            setIsExportingPDF(false);
         }
     };
 
@@ -1846,8 +2333,8 @@ STRICT RULES:
             <h2>EDA Report</h2>
             <p className="text-muted mt-1">Exploratory Data Analysis Automated</p>
           </div>
-          <button className="btn-primary" onClick={downloadPDF}>
-             <Download size={16} /> Download PDF
+          <button className="btn-primary" onClick={downloadPDF} disabled={isExportingPDF}>
+             {isExportingPDF ? <RefreshCcw className="animate-spin" size={16}/> : <Download size={16}/>} Download PDF
           </button>
         </div>
 
@@ -1927,9 +2414,8 @@ STRICT RULES:
          setChatTyping(true);
          try {
              let activeMemory = chatMemory;
-             // Requirement 1 & 2: After 10 messages, summarize into memory string, keeping last 4 + memory
              if (currentMessages.length > 10) {
-                 const msgsToCompress = currentMessages.slice(1, currentMessages.length - 4); // skip greeting, take older
+                 const msgsToCompress = currentMessages.slice(1, currentMessages.length - 4);
                  if (msgsToCompress.length > 0) {
                      const summarizePrompt = `Summarize the following chat history to serve as a compact context memory for future turns. Update the previous memory with any new important info.\n\nPrevious memory: ${activeMemory}\n\nChat:\n${msgsToCompress.map(m=>`${m.role}: ${m.content}`).join('\n')}`;
                      const sumResult = await callAI({ contents: [{role: 'user', parts: [{text: summarizePrompt}]}]});
@@ -1944,7 +2430,7 @@ STRICT RULES:
              const sampleData = JSON.stringify(data.slice(0, 3));
              const systemPrompt = `You are an AI Data Assistant. The dataset has columns: ${colsContext}. Sample data: ${sampleData}.\n${activeMemory ? `Memory Context: ${activeMemory}\n` : ''}Provide concise, helpful answers.`;
              
-             const historyForAPI = currentMessages.slice(1).map(m => ({ // Skip greeting
+             const historyForAPI = currentMessages.slice(1).map(m => ({
                  role: m.role,
                  parts: [{text: m.content}]
              }));
@@ -2135,7 +2621,6 @@ const ChartsSection = () => {
 
     const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg' = 'png') => {
       addToast(`Generating ${format.toUpperCase()}...`, 'info');
-      // Wait for React updates to settle
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       
       const element = document.getElementById(id);
@@ -2194,7 +2679,6 @@ const ChartsSection = () => {
       }
     };
 
-    // Sub-component for individual chart widgets
     const ChartWidget = ({ title, type, id }: { title: string, type: 'bar' | 'line' | 'pie' | 'scatter' | 'hist' | 'area', id: string }) => {
       const [xAxis, setXAxis] = useState(allCols[0]?.name || '');
       const [yAxis, setYAxis] = useState(numericCols[0]?.name || '');
@@ -2205,7 +2689,6 @@ const ChartsSection = () => {
 
       const chartData = useMemo(() => {
         if (type === 'hist') {
-          // Calculate histogram bins on sampledData
           const values = sampledData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
           if (!values.length) return [];
           const min = Math.min(...values);
@@ -2227,7 +2710,6 @@ const ChartsSection = () => {
         let sliceData = sampledData; 
         
         if (type === 'pie') {
-           // Aggregate by xAxis
            const aggregated: Record<string, number> = {};
            sliceData.forEach(d => {
              const key = String(d[xAxis] || 'Unknown');
@@ -2235,12 +2717,11 @@ const ChartsSection = () => {
              aggregated[key] = (aggregated[key] || 0) + val;
            });
            const result = Object.entries(aggregated).map(([name, value]) => ({ name, value }));
-           return result.sort((a,b) => b.value - a.value).slice(0, 10); // Show top 10 for pie
+           return result.sort((a,b) => b.value - a.value).slice(0, 10);
         }
 
         if (type === 'scatter') {
            if (sliceData.length > 1000) {
-               // 2D binning for large scatter plots
                const xValues = sliceData.map(d => Number(d[xAxis])).filter(n => !isNaN(n));
                const yValues = sliceData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
                if (!xValues.length || !yValues.length) return [];
@@ -2250,7 +2731,6 @@ const ChartsSection = () => {
                const minY = Math.min(...yValues);
                const maxY = Math.max(...yValues);
 
-               // Create 20x20 grid
                const gridX = 20;
                const gridY = 20;
                const stepX = (maxX - minX) / gridX || 1;
@@ -2351,7 +2831,7 @@ const ChartsSection = () => {
                   <XAxis dataKey={isMobile ? yAxis : xAxis} type={isMobile ? "number" : "category"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
                   <YAxis dataKey={isMobile ? xAxis : undefined} type={isMobile ? "category" : "number"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} tickLine={false} />
                   <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
-                  <Bar dataKey={yAxis} fill="url(#barGradient)" radius={isMobile ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={24} animationDuration={1500} animationEasing="ease-in-out" />
+                  <Bar dataKey={yAxis} fill="url(#barGradient)" radius={isMobile ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={24} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
                 </BarChart>
               ) : type === 'area' ? (
                 <AreaChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
@@ -2365,7 +2845,7 @@ const ChartsSection = () => {
                   <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
                   <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
                   <RechartsTooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey={yAxis} stroke="#6366F1" fillOpacity={1} fill="url(#colorGradient)" strokeWidth={3} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} animationDuration={1500} animationEasing="ease-in-out" />
+                  <Area type="monotone" dataKey={yAxis} stroke="#6366F1" fillOpacity={1} fill="url(#colorGradient)" strokeWidth={3} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
                 </AreaChart>
               ) : type === 'line' ? (
                 <LineChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
@@ -2373,11 +2853,11 @@ const ChartsSection = () => {
                   <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
                   <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
                   <RechartsTooltip content={<CustomTooltip />} />
-                  <Line type="monotone" dataKey={yAxis} stroke="#6366F1" strokeWidth={3} dot={false} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} animationDuration={1500} animationEasing="ease-in-out" />
+                  <Line type="monotone" dataKey={yAxis} stroke="#6366F1" strokeWidth={3} dot={false} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
                 </LineChart>
               ) : type === 'pie' ? (
                 <PieChart margin={{top: 10, right: 10, left: 10, bottom: 10}}>
-                  <Pie data={chartData} cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={5} dataKey="value" animationDuration={1500} animationEasing="ease-in-out">
+                  <Pie data={chartData} cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={5} dataKey="value" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out">
                     {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
                   </Pie>
                   <RechartsTooltip content={<CustomTooltip />} />
@@ -2390,7 +2870,7 @@ const ChartsSection = () => {
                   <YAxis type="number" dataKey={yAxis} name={yAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} />
                   <ZAxis dataKey={chartData[0] && chartData[0].count !== undefined ? 'count' : ''} range={[20, 200]} />
                   <RechartsTooltip content={<CustomTooltip />} />
-                  <Scatter data={chartData} fill="#22D3EE" animationDuration={1500} animationEasing="ease-in-out" />
+                  <Scatter data={chartData} fill="#22D3EE" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
                 </ScatterChart>
               ) : (
                 <BarChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
@@ -2404,7 +2884,7 @@ const ChartsSection = () => {
                   <XAxis dataKey="name" tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
                   <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
                   <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
-                  <Bar dataKey="count" fill="url(#barGradient2)" radius={[4, 4, 0, 0]} barSize={32} animationDuration={1500} animationEasing="ease-in-out" />
+                  <Bar dataKey="count" fill="url(#barGradient2)" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
                 </BarChart>
               )}
             </ResponsiveContainer>
@@ -3094,61 +3574,820 @@ const ChartsSection = () => {
      );
   };
 
+  // --- DASHBOARD BUILDER HELPERS & EFFECTS ---
+
+  // Load dashboard from localStorage on dataset change
+  useEffect(() => {
+    if (!fileInfo?.name) {
+      setWidgets([]);
+      setDashboardLayout([]);
+      return;
+    }
+    try {
+      const saved = localStorage.getItem(`datalens_dashboard_${fileInfo.name}`);
+      if (saved) {
+        const { savedWidgets, savedLayout } = JSON.parse(saved);
+        if (Array.isArray(savedWidgets)) setWidgets(savedWidgets);
+        if (Array.isArray(savedLayout)) setDashboardLayout(savedLayout);
+      } else {
+        setWidgets([]);
+        setDashboardLayout([]);
+      }
+    } catch (e) {
+      console.error('Error loading dashboard from localStorage', e);
+      setWidgets([]);
+      setDashboardLayout([]);
+    }
+  }, [fileInfo?.name]);
+
+  const loadSampleSalesDataset = () => {
+    const sampleRows = [];
+    const categories = ['Electronics', 'Furniture', 'Clothing', 'Office Supplies'];
+    const products: Record<string, string[]> = {
+      'Electronics': ['Smartwatch', 'Headphones', 'Laptop', 'Tablet', 'Camera'],
+      'Furniture': ['Office Chair', 'Desk', 'Bookshelf', 'Sofa', 'Dining Table'],
+      'Clothing': ['Hoodie', 'Sneakers', 'T-Shirt', 'Jeans', 'Jacket'],
+      'Office Supplies': ['Notebook', 'Pen Set', 'File Organizer', 'Stapler', 'Whiteboard']
+    };
+    const regions = ['North', 'East', 'South', 'West'];
+    
+    const baseDate = new Date(2026, 0, 1);
+    
+    for (let i = 0; i < 200; i++) {
+      const date = new Date(baseDate);
+      date.setDate(baseDate.getDate() + Math.floor(i / 3));
+      const dateString = date.toISOString().split('T')[0];
+      
+      const category = categories[Math.floor(Math.random() * categories.length)];
+      const productList = products[category];
+      const product = productList[Math.floor(Math.random() * productList.length)];
+      const region = regions[Math.floor(Math.random() * regions.length)];
+      const qty = Math.floor(Math.random() * 5) + 1;
+      const pricePerUnit = category === 'Electronics' ? Math.floor(Math.random() * 500) + 100 :
+                          category === 'Furniture' ? Math.floor(Math.random() * 300) + 50 :
+                          category === 'Clothing' ? Math.floor(Math.random() * 60) + 15 :
+                          Math.floor(Math.random() * 30) + 5;
+      const sales = pricePerUnit * qty;
+      const profit = Math.round((sales * 0.25 - 5) * 100) / 100;
+      
+      sampleRows.push({
+        'Date': dateString,
+        'Category': category,
+        'Product': product,
+        'Sales': sales,
+        'Quantity': qty,
+        'Profit': profit,
+        'Region': region,
+        'Customer ID': `C-100${Math.floor(Math.random() * 50) + 1}`
+      });
+    }
+    
+    const sampleCols = [
+      { name: 'Date', type: 'date' as const },
+      { name: 'Category', type: 'text' as const },
+      { name: 'Product', type: 'text' as const },
+      { name: 'Sales', type: 'number' as const },
+      { name: 'Quantity', type: 'number' as const },
+      { name: 'Profit', type: 'number' as const },
+      { name: 'Region', type: 'text' as const },
+      { name: 'Customer ID', type: 'text' as const }
+    ];
+    
+    setData(sampleRows);
+    setInitialData(sampleRows);
+    setColumns(sampleCols);
+    setInitialColumns(sampleCols);
+    setFileInfo({
+      name: 'Sample_Sales_Data.csv',
+      size: 15420,
+      rows: 200,
+      columns: 8,
+      type: 'text/csv'
+    });
+    
+    addToast('Sample sales dataset loaded successfully!', 'success');
+  };
+
+  const loadSalesTemplate = () => {
+    if (!data.length) return;
+    const salesCol = columns.find(c => /sales|revenue|amount|price|spend/i.test(c.name))?.name || (columns.find(c => c.type === 'number')?.name) || '';
+    const dateCol = columns.find(c => /date|year|month|time/i.test(c.name))?.name || '';
+    const catCol = columns.find(c => /category|type|genre|product|region|country/i.test(c.name))?.name || (columns.find(c => c.type === 'text')?.name) || '';
+    
+    const newWidgets: WidgetConfig[] = [];
+    const newLayout: any[] = [];
+    
+    if (salesCol) {
+      newWidgets.push({
+        id: 'kpi-sales-sum',
+        title: 'Total Revenue',
+        type: 'kpi',
+        column: salesCol,
+        operation: 'sum'
+      });
+      newLayout.push({ i: 'kpi-sales-sum', x: 0, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+      
+      newWidgets.push({
+        id: 'kpi-sales-avg',
+        title: 'Avg Order Value',
+        type: 'kpi',
+        column: salesCol,
+        operation: 'avg'
+      });
+      newLayout.push({ i: 'kpi-sales-avg', x: 4, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    }
+    
+    const countCol = columns[0]?.name || '';
+    if (countCol) {
+      newWidgets.push({
+        id: 'kpi-order-count',
+        title: 'Transactions Count',
+        type: 'kpi',
+        column: countCol,
+        operation: 'count'
+      });
+      newLayout.push({ i: 'kpi-order-count', x: 8, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    }
+    
+    if (salesCol && (dateCol || catCol)) {
+      const trendX = dateCol || catCol;
+      newWidgets.push({
+        id: 'chart-sales-trend',
+        title: `Sales Trend by ${trendX}`,
+        type: 'line',
+        xAxisColumn: trendX,
+        yAxisColumn: salesCol,
+        operation: 'sum'
+      });
+      newLayout.push({ i: 'chart-sales-trend', x: 0, y: 2, w: 8, h: 3, minW: 4, minH: 3 });
+    }
+    
+    if (salesCol && catCol) {
+      newWidgets.push({
+        id: 'chart-sales-category',
+        title: `Sales by ${catCol}`,
+        type: 'bar',
+        xAxisColumn: catCol,
+        yAxisColumn: salesCol,
+        operation: 'sum'
+      });
+      newLayout.push({ i: 'chart-sales-category', x: 8, y: 2, w: 4, h: 3, minW: 3, minH: 3 });
+    }
+    
+    const showCols = columns.slice(0, 4).map(c => c.name);
+    newWidgets.push({
+      id: 'table-sales-raw',
+      title: 'Top Records Snippet',
+      type: 'table',
+      tableColumns: showCols,
+      tableLimit: 5
+    });
+    newLayout.push({ i: 'table-sales-raw', x: 0, y: 5, w: 12, h: 3, minW: 4, minH: 3 });
+    
+    setWidgets(newWidgets);
+    setDashboardLayout(newLayout);
+    if (fileInfo?.name) {
+      localStorage.setItem(`datalens_dashboard_${fileInfo.name}`, JSON.stringify({
+        savedWidgets: newWidgets,
+        savedLayout: newLayout
+      }));
+    }
+    addToast('Sales Overview template loaded!', 'success');
+  };
+
+  const loadUserAnalyticsTemplate = () => {
+    if (!data.length) return;
+    const userCol = columns.find(c => /user|cust|member|id|visitor|email/i.test(c.name))?.name || columns[0]?.name || '';
+    const groupCol = columns.find(c => /segment|type|status|active|gender|role|region/i.test(c.name))?.name || columns.find(c => c.type === 'text')?.name || '';
+    const numCol = columns.find(c => /age|score|tenure|days|count|quantity|sales/i.test(c.name))?.name || '';
+    
+    const newWidgets: WidgetConfig[] = [];
+    const newLayout: any[] = [];
+    
+    if (userCol) {
+      newWidgets.push({
+        id: 'kpi-user-count',
+        title: 'Unique Active Entities',
+        type: 'kpi',
+        column: userCol,
+        operation: 'unique'
+      });
+      newLayout.push({ i: 'kpi-user-count', x: 0, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    }
+    
+    if (numCol) {
+      newWidgets.push({
+        id: 'kpi-num-avg',
+        title: `Average ${numCol}`,
+        type: 'kpi',
+        column: numCol,
+        operation: 'avg'
+      });
+      newLayout.push({ i: 'kpi-num-avg', x: 4, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    }
+    
+    newWidgets.push({
+      id: 'md-user-insights',
+      title: 'User Analytics Summary',
+      type: 'markdown',
+      content: '### Quick Insights\n- Data columns aggregated dynamically.\n- Segments distribution plots categorical volumes.\n- Resize or reorder widgets to design your report.'
+    });
+    newLayout.push({ i: 'md-user-insights', x: 8, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    
+    if (userCol && groupCol) {
+      newWidgets.push({
+        id: 'chart-user-group',
+        title: `Distribution by ${groupCol}`,
+        type: 'bar',
+        xAxisColumn: groupCol,
+        yAxisColumn: userCol,
+        operation: 'count'
+      });
+      newLayout.push({ i: 'chart-user-group', x: 0, y: 2, w: 12, h: 3, minW: 4, minH: 3 });
+    }
+    
+    setWidgets(newWidgets);
+    setDashboardLayout(newLayout);
+    if (fileInfo?.name) {
+      localStorage.setItem(`datalens_dashboard_${fileInfo.name}`, JSON.stringify({
+        savedWidgets: newWidgets,
+        savedLayout: newLayout
+      }));
+    }
+    addToast('User Analytics template loaded!', 'success');
+  };
+
+  const loadFinancialTemplate = () => {
+    if (!data.length) return;
+    const revCol = columns.find(c => /revenue|income|sales|earning/i.test(c.name))?.name || '';
+    const costCol = columns.find(c => /cost|expense|spend|payout/i.test(c.name))?.name || '';
+    const profitCol = columns.find(c => /profit|margin|gain/i.test(c.name))?.name || '';
+    const catCol = columns.find(c => /category|segment|dept|department/i.test(c.name))?.name || columns.find(c => c.type === 'text')?.name || '';
+    
+    const newWidgets: WidgetConfig[] = [];
+    const newLayout: any[] = [];
+    
+    let primaryCol = revCol || profitCol || (columns.find(c => c.type === 'number')?.name) || '';
+    
+    if (primaryCol) {
+      newWidgets.push({
+        id: 'kpi-fin-primary',
+        title: revCol ? 'Total Gross Income' : 'Primary Finance Value',
+        type: 'kpi',
+        column: primaryCol,
+        operation: 'sum'
+      });
+      newLayout.push({ i: 'kpi-fin-primary', x: 0, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    }
+    
+    if (costCol) {
+      newWidgets.push({
+        id: 'kpi-fin-cost',
+        title: 'Total Expenses',
+        type: 'kpi',
+        column: costCol,
+        operation: 'sum'
+      });
+      newLayout.push({ i: 'kpi-fin-cost', x: 4, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    }
+    
+    if (profitCol) {
+      newWidgets.push({
+        id: 'kpi-fin-profit',
+        title: 'Net Profit Margin',
+        type: 'kpi',
+        column: profitCol,
+        operation: 'sum'
+      });
+      newLayout.push({ i: 'kpi-fin-profit', x: 8, y: 0, w: 4, h: 2, minW: 3, minH: 2 });
+    }
+    
+    if (primaryCol && catCol) {
+      newWidgets.push({
+        id: 'chart-fin-cat',
+        title: `Income Distribution by ${catCol}`,
+        type: 'bar',
+        xAxisColumn: catCol,
+        yAxisColumn: primaryCol,
+        operation: 'sum'
+      });
+      newLayout.push({ i: 'chart-fin-cat', x: 0, y: 2, w: 12, h: 3, minW: 4, minH: 3 });
+    }
+    
+    setWidgets(newWidgets);
+    setDashboardLayout(newLayout);
+    if (fileInfo?.name) {
+      localStorage.setItem(`datalens_dashboard_${fileInfo.name}`, JSON.stringify({
+        savedWidgets: newWidgets,
+        savedLayout: newLayout
+      }));
+    }
+    addToast('Financial Summary template loaded!', 'success');
+  };
+
+  const clearDashboard = () => {
+    setWidgets([]);
+    setDashboardLayout([]);
+    if (fileInfo?.name) {
+      localStorage.removeItem(`datalens_dashboard_${fileInfo.name}`);
+    }
+    addToast('Dashboard canvas cleared!', 'info');
+  };
+
+  const handleOpenAddWidget = () => {
+    setEditingWidget(null);
+    const firstNumCol = columns.find(c => c.type === 'number')?.name || columns[0]?.name || '';
+    const firstStringCol = columns.find(c => c.type === 'text' || c.type === 'date')?.name || columns[0]?.name || '';
+    
+    setWidgetForm({
+      type: 'kpi',
+      title: 'New KPI Card',
+      column: firstNumCol,
+      operation: 'sum',
+      xAxisColumn: firstStringCol,
+      yAxisColumn: firstNumCol,
+      tableColumns: columns.slice(0, 4).map(c => c.name),
+      tableLimit: 5,
+      content: '### Notes\nWrite notes here.'
+    });
+    setIsWidgetModalOpen(true);
+  };
+
+  const handleOpenEditWidget = (widget: WidgetConfig) => {
+    setEditingWidget(widget);
+    setWidgetForm({
+      type: widget.type,
+      title: widget.title,
+      column: widget.column || '',
+      operation: widget.operation || 'sum',
+      xAxisColumn: widget.xAxisColumn || '',
+      yAxisColumn: widget.yAxisColumn || '',
+      tableColumns: widget.tableColumns || [],
+      tableLimit: widget.tableLimit || 5,
+      content: widget.content || ''
+    });
+    setIsWidgetModalOpen(true);
+  };
+
+  const handleDeleteWidget = (id: string) => {
+    const nextWidgets = widgets.filter(w => w.id !== id);
+    const nextLayout = dashboardLayout.filter(l => l.i !== id);
+    setWidgets(nextWidgets);
+    setDashboardLayout(nextLayout);
+    if (fileInfo?.name) {
+      localStorage.setItem(`datalens_dashboard_${fileInfo.name}`, JSON.stringify({
+        savedWidgets: nextWidgets,
+        savedLayout: nextLayout
+      }));
+    }
+    addToast('Widget removed!', 'info');
+  };
+
+  const handleSaveWidgetForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    let updatedWidgets = [...widgets];
+    let updatedLayout = [...dashboardLayout];
+    
+    if (editingWidget) {
+      updatedWidgets = widgets.map(w => {
+        if (w.id === editingWidget.id) {
+          return {
+            ...w,
+            title: widgetForm.title,
+            type: widgetForm.type,
+            column: widgetForm.column,
+            operation: widgetForm.operation,
+            xAxisColumn: widgetForm.xAxisColumn,
+            yAxisColumn: widgetForm.yAxisColumn,
+            tableColumns: widgetForm.tableColumns,
+            tableLimit: widgetForm.tableLimit,
+            content: widgetForm.content
+          };
+        }
+        return w;
+      });
+      addToast('Widget updated!', 'success');
+    } else {
+      const newId = `widget_${Date.now()}`;
+      const newWidget: WidgetConfig = {
+        id: newId,
+        title: widgetForm.title || `${widgetForm.type.toUpperCase()} Widget`,
+        type: widgetForm.type,
+        column: widgetForm.column,
+        operation: widgetForm.operation,
+        xAxisColumn: widgetForm.xAxisColumn,
+        yAxisColumn: widgetForm.yAxisColumn,
+        tableColumns: widgetForm.tableColumns,
+        tableLimit: widgetForm.tableLimit,
+        content: widgetForm.content
+      };
+      updatedWidgets.push(newWidget);
+      
+      let w = 4, h = 2;
+      if (widgetForm.type === 'line' || widgetForm.type === 'bar') {
+        w = 6; h = 3;
+      } else if (widgetForm.type === 'table') {
+        w = 12; h = 3;
+      }
+      
+      const maxY = dashboardLayout.reduce((max, item) => Math.max(max, item.y + item.h), 0);
+      updatedLayout.push({
+        i: newId,
+        x: 0,
+        y: maxY,
+        w,
+        h,
+        minW: widgetForm.type === 'kpi' || widgetForm.type === 'markdown' ? 3 : 4,
+        minH: widgetForm.type === 'kpi' || widgetForm.type === 'markdown' ? 2 : 3
+      });
+      addToast('Widget added!', 'success');
+    }
+    
+    setWidgets(updatedWidgets);
+    setDashboardLayout(updatedLayout);
+    if (fileInfo?.name) {
+      localStorage.setItem(`datalens_dashboard_${fileInfo.name}`, JSON.stringify({
+        savedWidgets: updatedWidgets,
+        savedLayout: updatedLayout
+      }));
+    }
+    setIsWidgetModalOpen(false);
+    setEditingWidget(null);
+  };
+
+  const handleLayoutChange = (newLayout: any[]) => {
+    setDashboardLayout(newLayout);
+    if (fileInfo?.name) {
+      localStorage.setItem(`datalens_dashboard_${fileInfo.name}`, JSON.stringify({
+        savedWidgets: widgets,
+        savedLayout: newLayout
+      }));
+    }
+  };
+
+  const aggregateData = (xAxisCol: string, yAxisCol: string, operation: string) => {
+    if (!data || !data.length || !xAxisCol) return [];
+    
+    const groups: Record<string, { key: string; values: number[]; count: number }> = {};
+    
+    data.forEach(row => {
+      const keyVal = row[xAxisCol];
+      const key = keyVal !== undefined && keyVal !== null ? String(keyVal) : 'N/A';
+      
+      let val = 0;
+      if (yAxisCol) {
+        const parsedVal = parseFloat(row[yAxisCol]);
+        val = isNaN(parsedVal) ? 0 : parsedVal;
+      }
+      
+      if (!groups[key]) {
+        groups[key] = { key, values: [], count: 0 };
+      }
+      groups[key].values.push(val);
+      groups[key].count += 1;
+    });
+    
+    let result = Object.values(groups).map(g => {
+      let aggregatedValue = 0;
+      if (operation === 'sum') {
+        aggregatedValue = g.values.reduce((sum, v) => sum + v, 0);
+      } else if (operation === 'avg') {
+        aggregatedValue = g.values.reduce((sum, v) => sum + v, 0) / Math.max(1, g.values.length);
+      } else if (operation === 'min') {
+        aggregatedValue = Math.min(...g.values);
+      } else if (operation === 'max') {
+        aggregatedValue = Math.max(...g.values);
+      } else if (operation === 'count') {
+        aggregatedValue = g.count;
+      }
+      aggregatedValue = Math.round(aggregatedValue * 100) / 100;
+      return {
+        name: g.key,
+        value: aggregatedValue
+      };
+    });
+
+    const isDateLike = result.every(item => !isNaN(Date.parse(item.name)));
+    if (isDateLike) {
+      result.sort((a, b) => Date.parse(a.name) - Date.parse(b.name));
+    } else {
+      result.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    }
+    return result;
+  };
+
+  const calculateKPIValue = (col: string | undefined, operation: string | undefined) => {
+    if (!data || !data.length) return 'N/A';
+    if (operation === 'count') return data.length.toLocaleString();
+    if (!col) return 'N/A';
+    
+    if (operation === 'unique') {
+      const uniqueVals = new Set(data.map(row => row[col]));
+      return uniqueVals.size.toLocaleString();
+    }
+    
+    const values = data
+      .map(row => parseFloat(row[col]))
+      .filter(v => !isNaN(v));
+      
+    if (values.length === 0) return '0';
+    
+    let resultValue = 0;
+    if (operation === 'sum') {
+      resultValue = values.reduce((sum, v) => sum + v, 0);
+    } else if (operation === 'avg') {
+      resultValue = values.reduce((sum, v) => sum + v, 0) / values.length;
+    } else if (operation === 'min') {
+      resultValue = Math.min(...values);
+    } else if (operation === 'max') {
+      resultValue = Math.max(...values);
+    }
+    
+    const isCurrency = /price|sales|revenue|profit|spend|amount|cost/i.test(col);
+    if (isCurrency) {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: resultValue % 1 === 0 ? 0 : 2 }).format(resultValue);
+    }
+    
+    return Math.round(resultValue * 100) / 100 !== resultValue
+      ? (Math.round(resultValue * 100) / 100).toLocaleString()
+      : resultValue.toLocaleString();
+  };
+
+  const renderMarkdown = (text: string | undefined) => {
+    if (!text) return null;
+    let html = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+      
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    html = html.replace(/`(.*?)`/g, '<code class="px-1.5 py-0.5 bg-[rgba(255,255,255,0.06)] border border-[var(--border)] rounded font-mono text-[11px] text-[var(--primary)]">$1</code>');
+    html = html.replace(/^### (.*?)$/gm, '<h4 class="text-sm font-bold text-white mt-3 mb-1">$1</h4>');
+    html = html.replace(/^## (.*?)$/gm, '<h3 class="text-base font-bold text-white mt-4 mb-2">$1</h3>');
+    html = html.replace(/^# (.*?)$/gm, '<h2 class="text-lg font-bold text-white mt-5 mb-3">$1</h2>');
+    html = html.replace(/^- (.*?)$/gm, '<li class="ml-4 list-disc text-muted">$1</li>');
+    html = html.replace(/\n/g, '<br />');
+    
+    return <div className="text-sm text-muted leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />;
+  };
+
+  const renderWidgetBody = (widget: WidgetConfig) => {
+    switch (widget.type) {
+      case 'kpi': {
+        const val = calculateKPIValue(widget.column, widget.operation);
+        const opLabel = widget.operation === 'sum' ? 'Total' :
+                        widget.operation === 'avg' ? 'Average' :
+                        widget.operation === 'min' ? 'Minimum' :
+                        widget.operation === 'max' ? 'Maximum' :
+                        widget.operation === 'count' ? 'Count' :
+                        widget.operation === 'unique' ? 'Unique' : '';
+                        
+        return (
+          <div className="flex flex-col justify-center items-center h-full text-center py-2">
+            <span className="text-[10px] text-muted font-bold tracking-widest uppercase mb-1">{opLabel} {widget.column || ''}</span>
+            <div className="text-3xl font-bold font-mono tracking-tight text-[var(--primary)] bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] bg-clip-text text-transparent truncate w-full px-2">
+              {val}
+            </div>
+          </div>
+        );
+      }
+      
+      case 'line': {
+        const chartData = aggregateData(widget.xAxisColumn || '', widget.yAxisColumn || '', widget.operation || 'sum');
+        if (!chartData.length) {
+          return (
+            <div className="flex flex-col items-center justify-center h-full text-muted text-xs">
+              No matching data found for aggregate
+            </div>
+          );
+        }
+        
+        return (
+          <div className="w-full h-full min-h-0 min-w-0 flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
+                <RechartsTooltip contentStyle={{ background: 'var(--surface)', borderColor: 'var(--border)' }} />
+                <Line type="monotone" dataKey="value" stroke="var(--primary)" strokeWidth={2} dot={{ fill: 'var(--primary)', r: 3 }} activeDot={{ r: 5 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      }
+      
+      case 'bar': {
+        const chartData = aggregateData(widget.xAxisColumn || '', widget.yAxisColumn || '', widget.operation || 'sum');
+        if (!chartData.length) {
+          return (
+            <div className="flex flex-col items-center justify-center h-full text-muted text-xs">
+              No matching data found for aggregate
+            </div>
+          );
+        }
+        
+        return (
+          <div className="w-full h-full min-h-0 min-w-0 flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
+                <RechartsTooltip contentStyle={{ background: 'var(--surface)', borderColor: 'var(--border)' }} />
+                <Bar dataKey="value" fill="var(--primary)" radius={[4, 4, 0, 0]}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? 'var(--primary)' : 'var(--success)'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      }
+      
+      case 'table': {
+        const selectedCols = widget.tableColumns || [];
+        const limit = widget.tableLimit || 5;
+        const rows = data.slice(0, limit);
+        
+        if (selectedCols.length === 0) {
+          return (
+            <div className="flex items-center justify-center h-full text-muted text-xs">
+              No columns selected
+            </div>
+          );
+        }
+        
+        return (
+          <div className="w-full h-full overflow-auto hidden-scrollbar flex-1">
+            <table className="w-full border-collapse text-left text-xs">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-muted">
+                  {selectedCols.map(col => (
+                    <th key={col} className="pb-2 font-semibold pr-4">{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={idx} className="border-b border-[var(--border)]/30 hover:bg-[rgba(255,255,255,0.02)]">
+                    {selectedCols.map(col => {
+                      const val = row[col];
+                      const isNum = typeof val === 'number';
+                      return (
+                        <td key={col} className={`py-2 pr-4 truncate max-w-[150px] ${isNum ? 'font-mono text-right text-[var(--success)]' : ''}`}>
+                          {val !== null && val !== undefined ? String(val) : '-'}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+      
+      case 'markdown': {
+        return (
+          <div className="w-full h-full overflow-y-auto hidden-scrollbar flex-1">
+            {renderMarkdown(widget.content)}
+          </div>
+        );
+      }
+      
+      default:
+        return null;
+    }
+  };
+
   const DashboardSection = () => {
+    if (!data || data.length === 0) {
+      return (
+        <div className="fade-in-up h-full flex flex-col items-center justify-center p-8 text-center max-w-xl mx-auto my-12">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/20">
+            <LayoutDashboard size={32} />
+          </div>
+          <h2 className="text-2xl font-bold mb-2">No Dataset Loaded</h2>
+          <p className="text-muted mb-8 leading-relaxed">
+            Upload your own spreadsheet on the **Upload Data** tab, or load a sample sales dataset to start designing interactive layouts immediately.
+          </p>
+          <div className="flex gap-4">
+            <button className="btn-secondary" onClick={() => setActiveTab('upload')}>
+              <Upload size={16} /> Go to Upload
+            </button>
+            <button className="btn-primary" onClick={loadSampleSalesDataset}>
+              <Sparkles size={16} /> Load Sample Sales Data
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
-       <div className="fade-in-up h-full flex flex-col">
-          <div className="flex justify-between items-center mb-6">
-             <div>
-                <h2>Dashboard Builder</h2>
-                <p className="text-muted mt-1">Drag and drop grid to build reports</p>
-             </div>
-             <div className="flex gap-2">
-                <button className="btn-secondary"><Component size={16}/> Load Template</button>
-                <button className="btn-primary"><Plus size={16}/> Add Widget</button>
-             </div>
+      <div className="fade-in-up h-full flex flex-col">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div>
+            <h2>Dashboard Builder</h2>
+            <p className="text-muted mt-1">Design a customized view with draggable and resizable reporting widgets</p>
           </div>
           
-          <div className="dashboard-canvas p-6 grid grid-cols-12 gap-4 auto-rows-[minmax(120px,auto)] flex-1 hidden-scrollbar">
-              
-              <div className="col-span-4 row-span-1 premium-card flex flex-col relative group transition-all hover:border-[var(--primary)] text-center justify-center shadow-lg">
-                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-[#070B14] p-1 rounded-md border border-[var(--border)]">
-                    <button className="text-muted hover:text-white"><Settings size={14}/></button>
-                 </div>
-                 <div className="text-sm text-muted font-semibold uppercase tracking-wider mb-2">Total Rows</div>
-                 <div className="text-5xl font-mono text-[var(--primary)] font-bold">{data.length}</div>
-              </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative">
+              <select 
+                className="premium-input premium-select min-w-[180px] bg-[var(--surface)] text-sm"
+                value=""
+                onChange={(e) => {
+                  if (e.target.value === 'sales') loadSalesTemplate();
+                  else if (e.target.value === 'users') loadUserAnalyticsTemplate();
+                  else if (e.target.value === 'finance') loadFinancialTemplate();
+                  e.target.value = '';
+                }}
+              >
+                <option value="" disabled>Load Template...</option>
+                <option value="sales">Sales Overview</option>
+                <option value="users">User Analytics</option>
+                <option value="finance">Financial Summary</option>
+              </select>
+            </div>
 
-              <div className="col-span-4 row-span-1 premium-card flex flex-col relative group transition-all hover:border-[var(--primary)] text-center justify-center shadow-lg">
-                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-[#070B14] p-1 rounded-md border border-[var(--border)]">
-                    <button className="text-muted hover:text-white"><Settings size={14}/></button>
-                 </div>
-                 <div className="text-sm text-muted font-semibold uppercase tracking-wider mb-2">Total Columns</div>
-                 <div className="text-5xl font-mono text-[var(--success)] font-bold">{columns.length}</div>
-              </div>
-              
-              <div className="col-span-4 row-span-1 premium-card flex flex-col relative group transition-all hover:border-[var(--primary)] text-center justify-center shadow-lg">
-                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-[#070B14] p-1 rounded-md border border-[var(--border)]">
-                    <button className="text-muted hover:text-white"><Settings size={14}/></button>
-                 </div>
-                 <div className="text-sm text-muted font-semibold uppercase tracking-wider mb-2">Completion Rate</div>
-                 <div className="text-5xl font-mono text-[var(--warning)] font-bold">98%</div>
-              </div>
+            {widgets.length > 0 && (
+              <button className="btn-secondary hover:text-[var(--danger)] hover:border-[var(--danger)]" onClick={clearDashboard}>
+                <Trash2 size={16}/> Clear Canvas
+              </button>
+            )}
 
-              <div className="col-span-8 row-span-3 premium-card relative group transition-all hover:border-[var(--primary)] p-4 shadow-lg">
-                 <div className="text-sm font-semibold mb-4">Sample Data Distribution</div>
-                 <div className="h-[280px] w-full flex items-center justify-center bg-[rgba(255,255,255,0.02)] border border-dashed border-[var(--border)] rounded-lg text-muted">
-                    <BarChart2 size={48} className="opacity-20"/>
-                 </div>
-              </div>
+            <button 
+              className={`btn-secondary ${!isEditMode ? 'bg-[rgba(99,102,241,0.08)] text-[var(--primary)] border-[var(--primary)]' : ''}`}
+              onClick={() => setIsEditMode(!isEditMode)}
+            >
+              {isEditMode ? <CheckCircle size={16}/> : <Wand2 size={16}/>}
+              {isEditMode ? 'Preview Mode' : 'Edit Mode'}
+            </button>
 
-              <div className="col-span-4 row-span-3 premium-card relative group transition-all hover:border-[var(--primary)] p-4 shadow-lg">
-                 <div className="text-sm font-semibold mb-4">Categories</div>
-                 <div className="h-[280px] w-full flex items-center justify-center bg-[rgba(255,255,255,0.02)] border border-dashed border-[var(--border)] rounded-lg text-muted">
-                    <PieChartIcon size={48} className="opacity-20"/>
-                 </div>
-              </div>
+            <button className="btn-primary" onClick={handleOpenAddWidget}>
+              <Plus size={16}/> Add Widget
+            </button>
           </div>
-       </div>
+        </div>
+
+        <div className={`dashboard-canvas flex-1 hidden-scrollbar p-4 relative ${isEditMode ? 'edit-mode-active' : ''}`} style={{ minHeight: '500px' }}>
+          {widgets.length === 0 ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-muted">
+              <LayoutDashboard size={48} className="opacity-20 mb-4" />
+              <div className="text-base font-semibold">Your Dashboard is Empty</div>
+              <p className="text-xs text-muted opacity-80 mt-1">Click "Add Widget" or choose a Template to get started.</p>
+            </div>
+          ) : (
+            <ReactGridLayout
+              className="layout"
+              layout={dashboardLayout}
+              onLayoutChange={handleLayoutChange}
+              cols={12}
+              rowHeight={100}
+              margin={[16, 16]}
+              isDraggable={isEditMode}
+              isResizable={isEditMode}
+              draggableHandle=".widget-drag-handle"
+              useCSSTransforms={true}
+            >
+              {widgets.map(widget => (
+                <div key={widget.id} className="premium-card flex flex-col overflow-hidden relative group shadow-lg p-0 bg-[var(--surface)] border border-[var(--border)] rounded-xl">
+                  <div className={`widget-drag-handle px-4 py-2 border-b border-[var(--border)] flex justify-between items-center cursor-move ${isEditMode ? 'bg-[rgba(255,255,255,0.02)]' : 'bg-transparent'}`}>
+                    <span className="font-semibold text-xs tracking-wider uppercase text-muted truncate max-w-[70%]">
+                      {widget.title}
+                    </span>
+                    {isEditMode && (
+                      <div className="flex gap-1.5 no-print">
+                        <button 
+                          className="p-1 rounded text-muted hover:text-white hover:bg-[rgba(255,255,255,0.05)] transition-colors"
+                          onClick={(e) => { e.stopPropagation(); handleOpenEditWidget(widget); }}
+                          title="Edit Widget"
+                        >
+                          <Settings size={12}/>
+                        </button>
+                        <button 
+                          className="p-1 rounded text-muted hover:text-[var(--danger)] hover:bg-[rgba(239,68,68,0.05)] transition-colors"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteWidget(widget.id); }}
+                          title="Delete Widget"
+                        >
+                          <Trash2 size={12}/>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 p-4 overflow-y-auto hidden-scrollbar flex flex-col min-h-0 min-w-0">
+                    {renderWidgetBody(widget)}
+                  </div>
+                </div>
+              ))}
+            </ReactGridLayout>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -3365,6 +4604,246 @@ const ChartsSection = () => {
             </div>
          </div>
       )}
+
+      {/* Widget Configuration Modal */}
+      {isWidgetModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in cursor-pointer" onClick={(e) => e.target === e.currentTarget && setIsWidgetModalOpen(false)}>
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl w-full max-w-lg p-6 shadow-2xl flex flex-col max-h-[90vh] cursor-default" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-bold text-white">
+                {editingWidget ? `Configure: ${editingWidget.title}` : 'Add New Widget'}
+              </h3>
+              <button className="text-muted hover:text-white" onClick={() => setIsWidgetModalOpen(false)}>
+                <X size={20}/>
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveWidgetForm} className="flex flex-col gap-4 overflow-y-auto pr-1 hidden-scrollbar flex-1">
+              
+              {/* Widget Type Selection */}
+              <div className="input-group">
+                <label className="input-label">Widget Type</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {[
+                    { id: 'kpi', label: 'KPI Card', icon: <Hash size={16} /> },
+                    { id: 'line', label: 'Line Chart', icon: <LineChartIcon size={16} /> },
+                    { id: 'bar', label: 'Bar Chart', icon: <BarChart2 size={16} /> },
+                    { id: 'table', label: 'Data Table', icon: <FileSpreadsheet size={16} /> },
+                    { id: 'markdown', label: 'Markdown', icon: <Type size={16} /> }
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`flex flex-col items-center justify-center p-3 rounded-lg border text-[10px] font-semibold gap-1.5 transition-all ${
+                        widgetForm.type === t.id
+                          ? 'border-[var(--primary)] bg-[rgba(99,102,241,0.08)] text-[var(--primary)]'
+                          : 'border-[var(--border)] bg-[var(--bg)] text-muted hover:text-white hover:border-gray-600'
+                      }`}
+                      onClick={() => {
+                        let defaultTitle = `New ${t.label}`;
+                        if (widgetForm.title && !widgetForm.title.startsWith('New ')) {
+                          defaultTitle = widgetForm.title;
+                        }
+                        setWidgetForm(prev => ({ ...prev, type: t.id as any, title: defaultTitle }));
+                      }}
+                    >
+                      {t.icon}
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Widget Title */}
+              <div className="input-group">
+                <label className="input-label" htmlFor="widget-title">Widget Title</label>
+                <input
+                  id="widget-title"
+                  type="text"
+                  className="premium-input"
+                  placeholder="Enter widget title..."
+                  value={widgetForm.title}
+                  onChange={(e) => setWidgetForm(prev => ({ ...prev, title: e.target.value }))}
+                  required
+                />
+              </div>
+
+              {/* Conditional options based on Widget Type */}
+              {widgetForm.type === 'kpi' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="input-group">
+                    <label className="input-label" htmlFor="kpi-column">Aggregate Column</label>
+                    <select
+                      id="kpi-column"
+                      className="premium-input premium-select"
+                      value={widgetForm.column}
+                      onChange={(e) => setWidgetForm(prev => ({ ...prev, column: e.target.value }))}
+                      required={widgetForm.operation !== 'count'}
+                      disabled={widgetForm.operation === 'count'}
+                    >
+                      <option value="" disabled>Select column...</option>
+                      {columns.map(c => (
+                        <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="input-group">
+                    <label className="input-label" htmlFor="kpi-op">Operation</label>
+                    <select
+                      id="kpi-op"
+                      className="premium-input premium-select"
+                      value={widgetForm.operation}
+                      onChange={(e) => setWidgetForm(prev => ({ ...prev, operation: e.target.value }))}
+                      required
+                    >
+                      <option value="sum">Sum (Numeric)</option>
+                      <option value="avg">Average (Numeric)</option>
+                      <option value="min">Minimum (Numeric)</option>
+                      <option value="max">Maximum (Numeric)</option>
+                      <option value="count">Count (All Rows)</option>
+                      <option value="unique">Unique Count (Any)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {(widgetForm.type === 'line' || widgetForm.type === 'bar') && (
+                <div className="flex flex-col gap-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="input-group">
+                      <label className="input-label" htmlFor="chart-x">X-Axis (Dimension)</label>
+                      <select
+                        id="chart-x"
+                        className="premium-input premium-select"
+                        value={widgetForm.xAxisColumn}
+                        onChange={(e) => setWidgetForm(prev => ({ ...prev, xAxisColumn: e.target.value }))}
+                        required
+                      >
+                        <option value="" disabled>Select x-axis...</option>
+                        {columns.map(c => (
+                          <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="input-group">
+                      <label className="input-label" htmlFor="chart-y">Y-Axis (Value)</label>
+                      <select
+                        id="chart-y"
+                        className="premium-input premium-select"
+                        value={widgetForm.yAxisColumn}
+                        onChange={(e) => setWidgetForm(prev => ({ ...prev, yAxisColumn: e.target.value }))}
+                        required={widgetForm.operation !== 'count'}
+                        disabled={widgetForm.operation === 'count'}
+                      >
+                        <option value="" disabled>Select y-axis...</option>
+                        {columns.filter(c => c.type === 'number').map(c => (
+                          <option key={c.name} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="input-group">
+                    <label className="input-label" htmlFor="chart-op">Calculation</label>
+                    <select
+                      id="chart-op"
+                      className="premium-input premium-select"
+                      value={widgetForm.operation}
+                      onChange={(e) => setWidgetForm(prev => ({ ...prev, operation: e.target.value }))}
+                      required
+                    >
+                      <option value="sum">Sum of Y Values</option>
+                      <option value="avg">Average of Y Values</option>
+                      <option value="min">Minimum of Y Values</option>
+                      <option value="max">Maximum of Y Values</option>
+                      <option value="count">Count of Records</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {widgetForm.type === 'table' && (
+                <div className="flex flex-col gap-4">
+                  <div className="input-group">
+                    <label className="input-label">Select Columns to Show</label>
+                    <div className="grid grid-cols-2 gap-2 bg-[var(--bg)] border border-[var(--border)] rounded-lg p-3 max-h-36 overflow-y-auto hidden-scrollbar">
+                      {columns.map(c => {
+                        const isChecked = widgetForm.tableColumns.includes(c.name);
+                        return (
+                          <label key={c.name} className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-muted hover:text-white select-none">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                setWidgetForm(prev => {
+                                  const tableColumns = isChecked
+                                    ? prev.tableColumns.filter(tc => tc !== c.name)
+                                    : [...prev.tableColumns, c.name];
+                                  return { ...prev, tableColumns };
+                                });
+                              }}
+                              className="rounded border-[var(--border)] bg-[var(--bg)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                            />
+                            {c.name}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="input-group">
+                    <label className="input-label" htmlFor="table-limit">Row Limit</label>
+                    <input
+                      id="table-limit"
+                      type="number"
+                      min="1"
+                      max="100"
+                      className="premium-input"
+                      value={widgetForm.tableLimit}
+                      onChange={(e) => setWidgetForm(prev => ({ ...prev, tableLimit: parseInt(e.target.value) || 5 }))}
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+
+              {widgetForm.type === 'markdown' && (
+                <div className="input-group">
+                  <label className="input-label" htmlFor="md-content">Markdown Content</label>
+                  <textarea
+                    id="md-content"
+                    rows={6}
+                    className="premium-input font-mono text-xs"
+                    placeholder="Enter basic Markdown notes... (**bold**, *italic*, # Headers)"
+                    value={widgetForm.content}
+                    onChange={(e) => setWidgetForm(prev => ({ ...prev, content: e.target.value }))}
+                    required
+                  />
+                  <div className="text-[10px] text-muted">
+                    Supports <strong># H1</strong>, <strong>## H2</strong>, <strong>### H3</strong>, <strong>- bullets</strong>, <strong>**bold**</strong>, <strong>*italic*</strong>, and <strong>`code`</strong>.
+                  </div>
+                </div>
+              )}
+
+              {/* Form Actions */}
+              <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-[var(--border)]">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setIsWidgetModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                >
+                  {editingWidget ? 'Update Widget' : 'Add Widget'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
 
       {/* Toasts */}
       <div className="toast-container z-50">
