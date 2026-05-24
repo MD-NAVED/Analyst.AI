@@ -3898,7 +3898,7 @@ const ChartsSection = () => {
             Workflow Architecture
           </h3>
           
-          <div className="pipeline-flow flex items-center gap-4 overflow-x-auto pb-4 scrollbar-thin">
+          <div className="w-full overflow-x-auto flex flex-row items-center gap-4 md:justify-start pb-2 scrollbar-thin">
             {pipelineSteps.map((step, idx) => {
               const isSource = step.type === 'source';
               const isClean = step.type === 'clean';
@@ -3909,7 +3909,7 @@ const ChartsSection = () => {
 
               return (
                 <React.Fragment key={step.id}>
-                  <div className={`pipeline-step shrink-0 border relative ${isSource ? 'active' : ''}`} style={{ minWidth: 220, maxWidth: 280 }}>
+                  <div className={`pipeline-step shrink-0 flex-shrink-0 border relative ${isSource ? 'active' : ''}`} style={{ minWidth: 220, maxWidth: 280 }}>
                     <div className="flex justify-between items-center mb-3">
                       <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded ${stepBadgeColor}`}>
                         {step.type}
@@ -3937,7 +3937,7 @@ const ChartsSection = () => {
                   </div>
                   
                   {idx < pipelineSteps.length - 1 && (
-                    <div className="pipeline-connector shrink-0 flex items-center justify-center">
+                    <div className="pipeline-connector shrink-0 flex-shrink-0 flex items-center justify-center">
                       <ArrowRight size={14} className="text-muted" />
                     </div>
                   )}
@@ -3946,13 +3946,13 @@ const ChartsSection = () => {
             })}
 
             {/* Add Step trigger card */}
-            <div className="pipeline-connector shrink-0">
+            <div className="pipeline-connector shrink-0 flex-shrink-0">
               <ArrowRight size={14} className="text-muted" />
             </div>
 
             <button 
               onClick={() => setShowAddForm(!showAddForm)}
-              className="pipeline-step shrink-0 border border-dashed border-[var(--border)] bg-transparent hover:bg-[rgba(255,255,255,0.02)] flex flex-col items-center justify-center cursor-pointer min-h-[96px] text-muted hover:text-white transition-all duration-200"
+              className="pipeline-step shrink-0 flex-shrink-0 border border-dashed border-[var(--border)] bg-transparent hover:bg-[rgba(255,255,255,0.02)] flex flex-col items-center justify-center cursor-pointer min-h-[96px] text-muted hover:text-white transition-all duration-200"
               style={{ minWidth: 200 }}
             >
               <Plus size={20} className="mb-1 text-[var(--primary)]" />
