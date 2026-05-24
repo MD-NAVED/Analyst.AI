@@ -1641,24 +1641,24 @@ STRICT RULES:
             <Upload size={32} />
           </div>
           <h3 className="mb-2">Click or drag file to this area</h3>
-          <p className="caption mb-6">Support for a single file upload. Maximum file size 100MB.</p>
+          <p className="text-xs text-slate-400 font-medium mb-6">Support for a single file upload. Maximum file size 100MB.</p>
           
           <div className="flex gap-4 mt-4">
-            <div className="badge badge-default flex items-center gap-1"><FileText size={12} /> CSV</div>
-            <div className="badge badge-success flex items-center gap-1"><FileSpreadsheet size={12} /> XLSX</div>
-            <div className="badge badge-warning flex items-center gap-1"><FileJson size={12} /> JSON</div>
+            <div className="bg-slate-800 text-slate-200 border-slate-700/60 font-semibold px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wide border flex items-center gap-1.5 shadow-sm"><FileText size={12} className="text-slate-400" /> CSV</div>
+            <div className="bg-emerald-950/80 text-emerald-300 border-emerald-800/60 font-semibold px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wide border flex items-center gap-1.5 shadow-sm"><FileSpreadsheet size={12} className="text-emerald-400" /> XLSX</div>
+            <div className="bg-amber-950/80 text-amber-300 border-amber-800/60 font-semibold px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wide border flex items-center gap-1.5 shadow-sm"><FileJson size={12} className="text-amber-400" /> JSON</div>
           </div>
         </label>
         
         <div className="flex justify-center mt-6">
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className="flex items-center justify-center gap-2.5 cursor-pointer select-none py-1.5 px-3 rounded-lg hover:bg-[rgba(255,255,255,0.02)] transition-colors">
             <input 
               type="checkbox" 
               checked={strictMode}
               onChange={(e) => setStrictMode(e.target.checked)}
-              className="accent-[var(--primary)] w-4 h-4"
+              className="accent-[var(--primary)] w-4 h-4 cursor-pointer align-middle rounded"
             />
-            <span className="text-sm">Enable Strict Mode (reject nulls/empty strings)</span>
+            <span className="text-sm text-slate-300 font-medium leading-none">Enable Strict Mode (reject nulls/empty strings)</span>
           </label>
         </div>
 
