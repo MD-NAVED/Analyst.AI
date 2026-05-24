@@ -571,6 +571,35 @@ export default function App() {
   const [autoPilotReport, setAutoPilotReport] = useState<any>(null);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   
+  // ETL Pipeline State
+  const [pipelineSteps, setPipelineSteps] = useState<any[]>([
+    { id: 'step-0', type: 'source', name: 'Source Dataset', config: {} },
+    { id: 'step-1', type: 'clean', name: 'Clean & Filter', config: {} }
+  ]);
+  const [isPipelineRunning, setIsPipelineRunning] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<any[] | null>(null);
+  const [pipelineColumns, setPipelineColumns] = useState<any[]>([]);
+
+  // Load saved ETL pipeline when file changes
+  useEffect(() => {
+    if (fileInfo?.name) {
+      try {
+        const saved = localStorage.getItem(`datalens_pipeline_${fileInfo.name}`);
+        if (saved) {
+          setPipelineSteps(JSON.parse(saved));
+        } else {
+          setPipelineSteps([
+            { id: 'step-0', type: 'source', name: 'Source Dataset', config: {} },
+            { id: 'step-1', type: 'clean', name: 'Clean & Filter', config: {} }
+          ]);
+        }
+      } catch (e) {
+        console.error("Failed to load saved pipeline", e);
+      }
+      setPipelineResult(null);
+    }
+  }, [fileInfo?.name]);
+
   const triggerSaveSession = useCallback(async () => {
     if ((showRestoreSession && !hasRestored) || (!data.length && !initialData.length)) return;
     try {
@@ -3522,56 +3551,762 @@ const ChartsSection = () => {
   };
 
   const PipelineSection = () => {
-     return (
-       <div className="fade-in-up h-full flex flex-col">
-          <div className="mb-8">
-             <h2>ETL Pipeline Builder</h2>
-             <p className="text-muted mt-1">Visually design data transformations and exports</p>
-          </div>
-          <div className="pipeline-flow flex-1 items-start">
-              <div className="pipeline-step active">
-                 <div className="flex justify-between items-center mb-3">
-                    <div className="text-[10px] bg-[var(--success)] text-black px-2 py-0.5 rounded uppercase font-bold tracking-wider flex items-center gap-1"><Database size={10}/> Source</div>
-                 </div>
-                 <div className="font-semibold text-lg mb-1">{fileInfo?.name || 'Dataset'}</div>
-                 <div className="text-xs text-muted font-mono">{data.length} rows × {columns.length} cols</div>
-              </div>
-              <div className="pipeline-connector"></div>
-              
-              <div className="pipeline-step">
-                 <div className="flex justify-between items-center mb-3">
-                    <div className="text-[10px] bg-[var(--warning)] text-black px-2 py-0.5 rounded uppercase font-bold tracking-wider flex items-center gap-1"><Wand2 size={10}/> Transform</div>
-                    <div className="text-muted cursor-pointer hover:text-white"><Settings size={14}/></div>
-                 </div>
-                 <div className="font-semibold text-lg mb-1">Clean & Filter</div>
-                 <div className="text-xs text-muted font-mono">Drop duplicates, fill nulls</div>
-              </div>
-              <div className="pipeline-connector"></div>
+    const [showAddForm, setShowAddForm] = useState(false);
+    const [newStepType, setNewStepType] = useState<'filter' | 'drop_columns' | 'fill_nulls' | 'replace' | 'group_by' | 'sort'>('filter');
 
-              <div className="pipeline-step">
-                 <div className="flex justify-between items-center mb-3">
-                    <div className="text-[10px] bg-[var(--primary)] text-white px-2 py-0.5 rounded uppercase font-bold tracking-wider flex items-center gap-1"><Terminal size={10}/> Query</div>
-                 </div>
-                 <div className="font-semibold text-lg mb-1">Aggregation</div>
-                 <div className="text-xs text-muted font-mono">GROUP BY Date</div>
-              </div>
-              <div className="pipeline-connector"></div>
+    // Config form states:
+    const [filterCol, setFilterCol] = useState(columns[0]?.name || '');
+    const [filterOp, setFilterOp] = useState('==');
+    const [filterVal, setFilterVal] = useState('');
 
-              <div className="pipeline-step border border-dashed border-[var(--border)] bg-transparent hover:bg-[rgba(255,255,255,0.02)] flex flex-col items-center justify-center cursor-pointer min-h-[120px] text-muted hover:text-white transition-colors">
-                 <Plus size={24} className="mb-2" />
-                 <span className="text-sm font-semibold">Add Step</span>
-              </div>
+    const [dropCols, setDropCols] = useState<string[]>([]);
+
+    const [fillCol, setFillCol] = useState(columns[0]?.name || '');
+    const [fillVal, setFillVal] = useState('');
+
+    const [repCol, setRepCol] = useState(columns[0]?.name || '');
+    const [repTarget, setRepTarget] = useState('');
+    const [repVal, setRepVal] = useState('');
+
+    const [sortCol, setSortCol] = useState(columns[0]?.name || '');
+    const [sortDir, setSortDir] = useState('asc');
+
+    const [groupByCol, setGroupByCol] = useState(columns.find(c => c.type === 'text')?.name || columns[0]?.name || '');
+    const [aggCol, setAggCol] = useState(columns.find(c => c.type === 'number')?.name || columns[0]?.name || '');
+    const [aggFn, setAggFn] = useState('sum');
+
+    // Preview table pagination
+    const [previewPage, setPreviewPage] = useState(0);
+    const rowsPerPage = 5;
+
+    // Reset column selectors when columns list changes
+    useEffect(() => {
+      if (columns.length > 0) {
+        setFilterCol(columns[0].name);
+        setFillCol(columns[0].name);
+        setRepCol(columns[0].name);
+        setSortCol(columns[0].name);
+        const textCol = columns.find(c => c.type === 'text')?.name || columns[0].name;
+        const numCol = columns.find(c => c.type === 'number')?.name || columns[0].name;
+        setGroupByCol(textCol);
+        setAggCol(numCol);
+      }
+    }, [columns]);
+
+    const handleAddStep = () => {
+      let config: any = {};
+      let name = '';
+
+      switch (newStepType) {
+        case 'filter':
+          if (!filterCol) {
+            addToast('Please select a column to filter', 'warning');
+            return;
+          }
+          config = { column: filterCol, operator: filterOp, value: filterVal };
+          name = `Filter: ${filterCol} ${filterOp} "${filterVal}"`;
+          break;
+        case 'drop_columns':
+          if (dropCols.length === 0) {
+            addToast('Please select at least one column to drop', 'warning');
+            return;
+          }
+          config = { selectedColumns: dropCols };
+          name = `Drop Columns: ${dropCols.join(', ')}`;
+          break;
+        case 'fill_nulls':
+          if (!fillCol) {
+            addToast('Please select a column', 'warning');
+            return;
+          }
+          config = { column: fillCol, fillValue: fillVal };
+          name = `Fill Nulls in ${fillCol} with "${fillVal}"`;
+          break;
+        case 'replace':
+          if (!repCol) {
+            addToast('Please select a column', 'warning');
+            return;
+          }
+          config = { column: repCol, target: repTarget, replacement: repVal };
+          name = `Replace in ${repCol}: "${repTarget}" → "${repVal}"`;
+          break;
+        case 'sort':
+          if (!sortCol) {
+            addToast('Please select a column to sort', 'warning');
+            return;
+          }
+          config = { column: sortCol, direction: sortDir };
+          name = `Sort by ${sortCol} (${sortDir.toUpperCase()})`;
+          break;
+        case 'group_by':
+          if (!groupByCol || !aggCol) {
+            addToast('Please select group and aggregation columns', 'warning');
+            return;
+          }
+          config = { groupColumn: groupByCol, aggColumn: aggCol, aggFunction: aggFn };
+          name = `Group By ${groupByCol}: ${aggFn.toUpperCase()}(${aggCol})`;
+          break;
+        default:
+          return;
+      }
+
+      const newStep = {
+        id: `step-${Date.now()}`,
+        type: newStepType,
+        name,
+        config
+      };
+
+      setPipelineSteps([...pipelineSteps, newStep]);
+      setShowAddForm(false);
+      // Reset config inputs
+      setFilterVal('');
+      setDropCols([]);
+      setFillVal('');
+      setRepTarget('');
+      setRepVal('');
+      addToast('Transformation step added successfully', 'success');
+    };
+
+    const handleDeleteStep = (id: string) => {
+      setPipelineSteps(pipelineSteps.filter(step => step.id !== id));
+      addToast('Transformation step removed', 'info');
+    };
+
+    const handleSavePipeline = () => {
+      if (!fileInfo?.name) return;
+      try {
+        localStorage.setItem(`datalens_pipeline_${fileInfo.name}`, JSON.stringify(pipelineSteps));
+        addToast('ETL Pipeline saved successfully to local storage!', 'success');
+      } catch (e) {
+        addToast('Failed to save pipeline', 'error');
+      }
+    };
+
+    const handleRunETL = () => {
+      if (data.length === 0) {
+        addToast('No source dataset available to run ETL', 'error');
+        return;
+      }
+      
+      setIsPipelineRunning(true);
+      setPipelineResult(null);
+
+      // Simulate a nice running progress
+      setTimeout(() => {
+        try {
+          let currentData = [...data];
+          let currentCols = [...columns];
+
+          for (const step of pipelineSteps) {
+            if (step.type === 'source') continue;
+
+            if (step.type === 'clean') {
+              // 1. Drop duplicates
+              const seen = new Set();
+              currentData = currentData.filter(row => {
+                const str = JSON.stringify(row);
+                if (seen.has(str)) return false;
+                seen.add(str);
+                return true;
+              });
+              // 2. Drop empty rows
+              currentData = currentData.filter(row => {
+                return Object.values(row).some(val => val !== null && val !== undefined && val !== '');
+              });
+            }
+
+            if (step.type === 'filter') {
+              const { column, operator, value } = step.config;
+              if (column) {
+                currentData = currentData.filter(row => {
+                  const cellVal = row[column];
+                  if (cellVal === undefined || cellVal === null) return false;
+                  
+                  const compareVal = isNaN(Number(value)) ? value : Number(value);
+                  const cellNum = isNaN(Number(cellVal)) ? String(cellVal).toLowerCase() : Number(cellVal);
+                  const compNum = typeof compareVal === 'string' ? compareVal.toLowerCase() : compareVal;
+                  
+                  switch (operator) {
+                    case '==': return String(cellVal).toLowerCase() === String(value).toLowerCase();
+                    case '!=': return String(cellVal).toLowerCase() !== String(value).toLowerCase();
+                    case '>': return Number(cellVal) > Number(value);
+                    case '<': return Number(cellVal) < Number(value);
+                    case '>=': return Number(cellVal) >= Number(value);
+                    case '<=': return Number(cellVal) <= Number(value);
+                    case 'contains': return String(cellVal).toLowerCase().includes(String(value).toLowerCase());
+                    case 'is_not_null': return cellVal !== null && cellVal !== undefined && cellVal !== '';
+                    default: return true;
+                  }
+                });
+              }
+            }
+
+            if (step.type === 'drop_columns') {
+              const { selectedColumns } = step.config;
+              if (selectedColumns && selectedColumns.length > 0) {
+                currentData = currentData.map(row => {
+                  const newRow = { ...row };
+                  selectedColumns.forEach((col: string) => {
+                    delete newRow[col];
+                  });
+                  return newRow;
+                });
+                currentCols = currentCols.filter(c => !selectedColumns.includes(c.name));
+              }
+            }
+
+            if (step.type === 'fill_nulls') {
+              const { column, fillValue } = step.config;
+              if (column) {
+                currentData = currentData.map(row => {
+                  if (row[column] === null || row[column] === undefined || row[column] === '') {
+                    return { ...row, [column]: isNaN(Number(fillValue)) ? fillValue : Number(fillValue) };
+                  }
+                  return row;
+                });
+              }
+            }
+
+            if (step.type === 'replace') {
+              const { column, target, replacement } = step.config;
+              if (column) {
+                currentData = currentData.map(row => {
+                  if (String(row[column] ?? '') === String(target)) {
+                    return { ...row, [column]: isNaN(Number(replacement)) ? replacement : Number(replacement) };
+                  }
+                  return row;
+                });
+              }
+            }
+
+            if (step.type === 'sort') {
+              const { column, direction } = step.config;
+              if (column) {
+                currentData.sort((a, b) => {
+                  const valA = a[column];
+                  const valB = b[column];
+                  if (valA === valB) return 0;
+                  if (valA === null || valA === undefined) return 1;
+                  if (valB === null || valB === undefined) return -1;
+                  
+                  const isNum = !isNaN(Number(valA)) && !isNaN(Number(valB));
+                  if (direction === 'asc') {
+                    return isNum ? Number(valA) - Number(valB) : String(valA).localeCompare(String(valB));
+                  } else {
+                    return isNum ? Number(valB) - Number(valA) : String(valB).localeCompare(String(valA));
+                  }
+                });
+              }
+            }
+
+            if (step.type === 'group_by') {
+              const { groupColumn, aggColumn, aggFunction } = step.config;
+              if (groupColumn && aggColumn && aggFunction) {
+                const groups: Record<string, number[]> = {};
+                currentData.forEach(row => {
+                  const key = String(row[groupColumn] ?? 'Unknown');
+                  const val = Number(row[aggColumn]);
+                  if (!isNaN(val)) {
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(val);
+                  }
+                });
+                
+                currentData = Object.entries(groups).map(([key, vals]) => {
+                  let aggVal = 0;
+                  if (aggFunction === 'sum') aggVal = vals.reduce((s, v) => s + v, 0);
+                  else if (aggFunction === 'avg') aggVal = vals.reduce((s, v) => s + v, 0) / vals.length;
+                  else if (aggFunction === 'min') aggVal = Math.min(...vals);
+                  else if (aggFunction === 'max') aggVal = Math.max(...vals);
+                  else if (aggFunction === 'count') aggVal = vals.length;
+                  
+                  return {
+                    [groupColumn]: key,
+                    [`${aggColumn}_${aggFunction}`]: parseFloat(aggVal.toFixed(2))
+                  };
+                });
+                
+                currentCols = [
+                  { name: groupColumn, type: 'text' },
+                  { name: `${aggColumn}_${aggFunction}`, type: 'number' }
+                ];
+              }
+            }
+          }
+
+          setPipelineResult(currentData);
+          setPipelineColumns(currentCols);
+          setPreviewPage(0);
+          addToast(`ETL Execution Succeeded! Processed ${currentData.length.toLocaleString()} rows × ${currentCols.length} columns`, 'success');
+        } catch (e: any) {
+          console.error("ETL Runtime Error:", e);
+          addToast(`ETL Pipeline Failed: ${e.message || e}`, 'error');
+        } finally {
+          setIsPipelineRunning(false);
+        }
+      }, 1000);
+    };
+
+    const handleDownloadResult = () => {
+      if (!pipelineResult || pipelineResult.length === 0) return;
+      try {
+        const csv = Papa.unparse(pipelineResult);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        const prefix = fileInfo?.name ? fileInfo.name.split('.')[0] : 'datalens';
+        link.setAttribute("download", `${prefix}_transformed.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        addToast("Transformed dataset downloaded successfully!", "success");
+      } catch (e) {
+        addToast("Export failed", "error");
+      }
+    };
+
+    const handleToggleDropCol = (colName: string) => {
+      if (dropCols.includes(colName)) {
+        setDropCols(dropCols.filter(c => c !== colName));
+      } else {
+        setDropCols([...dropCols, colName]);
+      }
+    };
+
+    return (
+      <div className="fade-in-up h-full flex flex-col gap-6">
+        <div className="flex justify-between items-center">
+          <div>
+            <h2>ETL Pipeline Builder</h2>
+            <p className="text-muted mt-1">Visually design data transformation workflows, aggregate fields, and export clean results.</p>
           </div>
+          {fileInfo?.name && (
+            <div className="badge badge-default flex items-center gap-1.5 font-mono text-xs py-1.5 px-3">
+              <Database size={12} className="text-[var(--primary)]" />
+              {fileInfo.name}
+            </div>
+          )}
+        </div>
+
+        {/* Dynamic Pipeline Steps flow */}
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 relative overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none opacity-5" style={{ background: 'radial-gradient(circle at top right, var(--primary), transparent 40%)' }}></div>
+          <h3 className="text-base font-bold mb-4 flex items-center gap-2">
+            <Workflow size={18} className="text-[var(--primary)]" />
+            Workflow Architecture
+          </h3>
           
-          <div className="mt-auto p-4 bg-[var(--surface)] border border-[var(--border)] rounded-xl flex justify-between items-center">
-             <div className="text-sm text-muted">Pipeline contains 3 steps. Unsaved changes.</div>
-             <div className="flex gap-2">
-                 <button className="btn-secondary"><Save size={16}/> Save Pipeline</button>
-                 <button className="btn-primary"><Play size={16}/> Run ETL</button>
-             </div>
+          <div className="pipeline-flow flex items-center gap-4 overflow-x-auto pb-4 scrollbar-thin">
+            {pipelineSteps.map((step, idx) => {
+              const isSource = step.type === 'source';
+              const isClean = step.type === 'clean';
+              
+              let stepBadgeColor = 'bg-[var(--primary)] text-white';
+              if (isSource) stepBadgeColor = 'bg-[var(--success)] text-black font-bold';
+              else if (isClean) stepBadgeColor = 'bg-[var(--warning)] text-black font-bold';
+
+              return (
+                <React.Fragment key={step.id}>
+                  <div className={`pipeline-step shrink-0 border relative ${isSource ? 'active' : ''}`} style={{ minWidth: 220, maxWidth: 280 }}>
+                    <div className="flex justify-between items-center mb-3">
+                      <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded ${stepBadgeColor}`}>
+                        {step.type}
+                      </span>
+                      {!isSource && !isClean && (
+                        <button 
+                          className="text-muted hover:text-[var(--error)] transition-colors cursor-pointer"
+                          onClick={() => handleDeleteStep(step.id)}
+                          title="Delete transformation step"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="font-semibold text-sm text-white mb-1 truncate" title={step.name}>
+                      {step.name}
+                    </div>
+                    
+                    <div className="text-[11px] text-muted font-mono leading-relaxed truncate">
+                      {isSource ? `${data.length.toLocaleString()} rows × ${columns.length} cols` : 
+                       isClean ? 'Drop duplicates, drop empty rows' : 
+                       JSON.stringify(step.config)}
+                    </div>
+                  </div>
+                  
+                  {idx < pipelineSteps.length - 1 && (
+                    <div className="pipeline-connector shrink-0 flex items-center justify-center">
+                      <ArrowRight size={14} className="text-muted" />
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+
+            {/* Add Step trigger card */}
+            <div className="pipeline-connector shrink-0">
+              <ArrowRight size={14} className="text-muted" />
+            </div>
+
+            <button 
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="pipeline-step shrink-0 border border-dashed border-[var(--border)] bg-transparent hover:bg-[rgba(255,255,255,0.02)] flex flex-col items-center justify-center cursor-pointer min-h-[96px] text-muted hover:text-white transition-all duration-200"
+              style={{ minWidth: 200 }}
+            >
+              <Plus size={20} className="mb-1 text-[var(--primary)]" />
+              <span className="text-xs font-semibold">Add Transformation</span>
+            </button>
           </div>
-       </div>
-     );
+        </div>
+
+        {/* Configure Transformation Step Form */}
+        {showAddForm && (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 fade-in shadow-2xl">
+            <h3 className="text-base font-bold mb-4 flex items-center gap-2">
+              <Zap size={18} className="text-[var(--warning)]" />
+              Configure Transformation Step
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Step Operation</label>
+                <select 
+                  value={newStepType}
+                  onChange={(e) => setNewStepType(e.target.value as any)}
+                  className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
+                >
+                  <option value="filter">Filter Rows</option>
+                  <option value="drop_columns">Drop Columns</option>
+                  <option value="fill_nulls">Fill Null / Missing Values</option>
+                  <option value="replace">Replace Value</option>
+                  <option value="sort">Sort Data</option>
+                  <option value="group_by">Group By & Aggregate</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-3 bg-[rgba(255,255,255,0.02)] p-4 rounded-lg border border-[var(--border)]">
+                {newStepType === 'filter' && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Column</label>
+                      <select 
+                        value={filterCol}
+                        onChange={(e) => setFilterCol(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Operator</label>
+                      <select 
+                        value={filterOp}
+                        onChange={(e) => setFilterOp(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        <option value="==">Equals (==)</option>
+                        <option value="!=">Does Not Equal (!=)</option>
+                        <option value=">">Greater Than (&gt;)</option>
+                        <option value="<">Less Than (&lt;)</option>
+                        <option value=">=">Greater Than or Equal (&gt;=)</option>
+                        <option value="<=">Less Than or Equal (&lt;=)</option>
+                        <option value="contains">Contains (text search)</option>
+                        <option value="is_not_null">Is Not Null / Empty</option>
+                      </select>
+                    </div>
+                    {filterOp !== 'is_not_null' && (
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Value</label>
+                        <input 
+                          type="text"
+                          value={filterVal}
+                          onChange={(e) => setFilterVal(e.target.value)}
+                          placeholder="e.g. 50 or Premium"
+                          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {newStepType === 'drop_columns' && (
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Select Columns to Drop</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[120px] overflow-y-auto pr-2 scrollbar-thin">
+                      {columns.map(c => (
+                        <label key={c.name} className="flex items-center gap-2 p-1.5 rounded bg-[var(--bg)] border border-[var(--border)] text-xs text-muted cursor-pointer hover:border-[var(--primary)] hover:text-white transition-colors">
+                          <input 
+                            type="checkbox"
+                            checked={dropCols.includes(c.name)}
+                            onChange={() => handleToggleDropCol(c.name)}
+                          />
+                          <span className="truncate">{c.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {newStepType === 'fill_nulls' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Column</label>
+                      <select 
+                        value={fillCol}
+                        onChange={(e) => setFillCol(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Replacement Value</label>
+                      <input 
+                        type="text"
+                        value={fillVal}
+                        onChange={(e) => setFillVal(e.target.value)}
+                        placeholder="e.g. 0 or Unknown"
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {newStepType === 'replace' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Column</label>
+                      <select 
+                        value={repCol}
+                        onChange={(e) => setRepCol(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Value to Find</label>
+                      <input 
+                        type="text"
+                        value={repTarget}
+                        onChange={(e) => setRepTarget(e.target.value)}
+                        placeholder="e.g. Basic"
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Replace with</label>
+                      <input 
+                        type="text"
+                        value={repVal}
+                        onChange={(e) => setRepVal(e.target.value)}
+                        placeholder="e.g. Standard"
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {newStepType === 'sort' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Sort Column</label>
+                      <select 
+                        value={sortCol}
+                        onChange={(e) => setSortCol(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Direction</label>
+                      <select 
+                        value={sortDir}
+                        onChange={(e) => setSortDir(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        <option value="asc">Ascending (A → Z, Low → High)</option>
+                        <option value="desc">Descending (Z → A, High → Low)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {newStepType === 'group_by' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Group Column (Text)</label>
+                      <select 
+                        value={groupByCol}
+                        onChange={(e) => setGroupByCol(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Aggregation Column (Number)</label>
+                      <select 
+                        value={aggCol}
+                        onChange={(e) => setAggCol(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Agg Function</label>
+                      <select 
+                        value={aggFn}
+                        onChange={(e) => setAggFn(e.target.value)}
+                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
+                      >
+                        <option value="sum">SUM</option>
+                        <option value="avg">AVERAGE</option>
+                        <option value="min">MINIMUM</option>
+                        <option value="max">MAXIMUM</option>
+                        <option value="count">COUNT Rows</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button 
+                className="btn-secondary text-xs cursor-pointer"
+                onClick={() => setShowAddForm(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn-primary text-xs cursor-pointer flex items-center gap-1.5"
+                onClick={handleAddStep}
+              >
+                <Plus size={14} /> Add to Pipeline
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Global Pipeline Action trigger footer */}
+        <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-xl flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="text-sm text-muted text-center sm:text-left">
+            Pipeline contains <span className="text-white font-semibold">{pipelineSteps.length} steps</span>. Setup transformations, run, and export.
+          </div>
+          <div className="flex gap-3 w-full sm:w-auto">
+            <button 
+              className="btn-secondary flex-1 sm:flex-initial flex items-center justify-center gap-2 cursor-pointer" 
+              onClick={handleSavePipeline}
+              title="Save current steps sequence to local storage"
+            >
+              <Save size={16}/> Save Pipeline
+            </button>
+            <button 
+              className="btn-primary flex-1 sm:flex-initial flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isPipelineRunning}
+              onClick={handleRunETL}
+            >
+              {isPipelineRunning ? (
+                <>
+                  <RefreshCcw className="animate-spin" size={16} /> Running ETL...
+                </>
+              ) : (
+                <>
+                  <Play size={16}/> Run ETL Pipeline
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* ETL Transformed Preview panel */}
+        {pipelineResult && (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 fade-in flex flex-col gap-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="text-base font-bold flex items-center gap-2 text-[var(--success)]">
+                  <CheckCircle size={18} />
+                  ETL Run Result Details
+                </h3>
+                <p className="text-xs text-muted font-mono mt-1">
+                  Generated {pipelineResult.length.toLocaleString()} rows × {pipelineColumns.length} columns
+                </p>
+              </div>
+              <button 
+                className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center cursor-pointer"
+                onClick={handleDownloadResult}
+              >
+                <Download size={16} /> Export Transformed CSV
+              </button>
+            </div>
+
+            {/* Beautiful Preview Table */}
+            {pipelineResult.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-[var(--border)] bg-[rgba(255,255,255,0.02)]">
+                        {pipelineColumns.map((col) => (
+                          <th key={col.name} className="p-3 font-semibold uppercase tracking-wider text-muted whitespace-nowrap">
+                            {col.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pipelineResult.slice(previewPage * rowsPerPage, (previewPage + 1) * rowsPerPage).map((row, rowIdx) => (
+                        <tr key={rowIdx} className="border-b border-[var(--border)] hover:bg-[rgba(255,255,255,0.01)] transition-colors">
+                          {pipelineColumns.map((col) => (
+                            <td key={col.name} className="p-3 text-[var(--text-primary)] whitespace-nowrap">
+                              {row[col.name] != null ? String(row[col.name]) : <span className="text-muted italic">null</span>}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Micro pagination controls */}
+                {pipelineResult.length > rowsPerPage && (
+                  <div className="flex justify-between items-center text-xs text-muted px-1 mt-1">
+                    <div>
+                      Showing {previewPage * rowsPerPage + 1} to {Math.min((previewPage + 1) * rowsPerPage, pipelineResult.length)} of {pipelineResult.length.toLocaleString()} rows
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        disabled={previewPage === 0}
+                        onClick={() => setPreviewPage(previewPage - 1)}
+                        className="btn-secondary py-1 px-3 disabled:opacity-50 text-[11px] cursor-pointer"
+                      >
+                        Prev
+                      </button>
+                      <button 
+                        disabled={(previewPage + 1) * rowsPerPage >= pipelineResult.length}
+                        onClick={() => setPreviewPage(previewPage + 1)}
+                        className="btn-secondary py-1 px-3 disabled:opacity-50 text-[11px] cursor-pointer"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-8 text-center text-muted border border-dashed border-[var(--border)] rounded-xl">
+                The ETL transformations resulted in an empty dataset. Try loosening your filter criteria.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // --- DASHBOARD BUILDER HELPERS & EFFECTS ---
