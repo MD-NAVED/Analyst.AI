@@ -24,6 +24,13 @@ import GridLayout, { WidthProvider } from 'react-grid-layout/legacy';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
+// White-label Rebranding Context, Hooks, and Gates
+import { BrandConfigProvider } from './config/brandContext';
+import { useBrandConfig } from './config/useBrandConfig';
+import { FeatureGate } from './components/branding/FeatureGate';
+import { DynamicLogo } from './components/branding/DynamicLogo';
+import { DynamicFavicon } from './components/branding/DynamicFavicon';
+
 
 // --- TYPES ---
 interface ErrorBoundaryProps {
@@ -485,7 +492,8 @@ const calculateSilhouetteScore = (points: number[][], clusters: number[]): numbe
 
 const ReactGridLayout = WidthProvider(GridLayout);
 
-export default function App() {
+function MainApp() {
+  const { config, appName, appTagline, hasFeature } = useBrandConfig();
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'pivot' | 'eda' | 'chat' | 'sql' | 'ml' | 'dashboard' | 'pipeline' | 'auto-analyst'>('upload');
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
   const [data, setData] = useState<any[]>([]);
@@ -5150,14 +5158,7 @@ const ChartsSection = () => {
       {/* Sidebar */}
       <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] flex items-center justify-center text-white mr-3 shadow-lg shadow-indigo-500/20">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <path d="M11 8v6M8 11v3M14 9v5" />
-            </svg>
-          </div>
-          <span className="font-extrabold text-xl tracking-tight">DataLens <span className="text-[#6366F1]">AI</span></span>
+          <DynamicLogo />
         </div>
         
         <div className="nav-list mt-4">
@@ -5173,16 +5174,20 @@ const ChartsSection = () => {
               <div className={`nav-item ${activeTab === 'preview' ? 'active' : ''}`} onClick={() => setActiveTab('preview')}>
                 <FileSpreadsheet size={18} /> Data Preview
               </div>
-              <div className={`nav-item ${activeTab === 'cleaning' ? 'active' : ''}`} onClick={() => setActiveTab('cleaning')}>
-                <Wand2 size={18} /> Data Cleaning
-              </div>
+              {hasFeature('dataCleaning') && (
+                <div className={`nav-item ${activeTab === 'cleaning' ? 'active' : ''}`} onClick={() => setActiveTab('cleaning')}>
+                  <Wand2 size={18} /> Data Cleaning
+                </div>
+              )}
 
               <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                 Analysis
               </div>
-              <div className={`nav-item ${activeTab === 'pivot' ? 'active' : ''}`} onClick={() => setActiveTab('pivot')}>
-                <Activity size={18} /> Pivot Table
-              </div>
+              {hasFeature('pivotTables') && (
+                <div className={`nav-item ${activeTab === 'pivot' ? 'active' : ''}`} onClick={() => setActiveTab('pivot')}>
+                  <Activity size={18} /> Pivot Table
+                </div>
+              )}
               <div className={`nav-item ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => setActiveTab('stats')}>
                 <Hash size={18} /> Statistics
               </div>
@@ -5192,27 +5197,44 @@ const ChartsSection = () => {
               <div className={`nav-item ${activeTab === 'eda' ? 'active' : ''}`} onClick={() => setActiveTab('eda')}>
                 <FileOutput size={18} /> EDA Report
               </div>
-              <div className={`nav-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
-                <MessageSquare size={18} /> AI Chat
-              </div>
-              <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                Advanced
-              </div>
-              <div className={`nav-item ${activeTab === 'auto-analyst' ? 'active' : ''}`} onClick={() => setActiveTab('auto-analyst')}>
-                <Wand2 size={18} /> Auto-Analyst
-              </div>
-              <div className={`nav-item ${activeTab === 'sql' ? 'active' : ''}`} onClick={() => setActiveTab('sql')}>
-                <Terminal size={18} /> SQL Engine
-              </div>
-              <div className={`nav-item ${activeTab === 'ml' ? 'active' : ''}`} onClick={() => setActiveTab('ml')}>
-                <Network size={18} /> ML Lab
-              </div>
-              <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-                <LayoutDashboard size={18} /> Dashboard
-              </div>
-              <div className={`nav-item ${activeTab === 'pipeline' ? 'active' : ''}`} onClick={() => setActiveTab('pipeline')}>
-                <Workflow size={18} /> ETL Pipeline
-              </div>
+              {hasFeature('chat') && (
+                <div className={`nav-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+                  <MessageSquare size={18} /> AI Chat
+                </div>
+              )}
+
+              {(hasFeature('autoAnalyst') || hasFeature('sqlEngine') || hasFeature('mlLab') || hasFeature('dashboard') || hasFeature('pipeline')) && (
+                <>
+                  <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                    Advanced
+                  </div>
+                  {hasFeature('autoAnalyst') && (
+                    <div className={`nav-item ${activeTab === 'auto-analyst' ? 'active' : ''}`} onClick={() => setActiveTab('auto-analyst')}>
+                      <Wand2 size={18} /> Auto-Analyst
+                    </div>
+                  )}
+                  {hasFeature('sqlEngine') && (
+                    <div className={`nav-item ${activeTab === 'sql' ? 'active' : ''}`} onClick={() => setActiveTab('sql')}>
+                      <Terminal size={18} /> SQL Engine
+                    </div>
+                  )}
+                  {hasFeature('mlLab') && (
+                    <div className={`nav-item ${activeTab === 'ml' ? 'active' : ''}`} onClick={() => setActiveTab('ml')}>
+                      <Network size={18} /> ML Lab
+                    </div>
+                  )}
+                  {hasFeature('dashboard') && (
+                    <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+                      <LayoutDashboard size={18} /> Dashboard
+                    </div>
+                  )}
+                  {hasFeature('pipeline') && (
+                    <div className={`nav-item ${activeTab === 'pipeline' ? 'active' : ''}`} onClick={() => setActiveTab('pipeline')}>
+                      <Workflow size={18} /> ETL Pipeline
+                    </div>
+                  )}
+                </>
+              )}
             </>
           )}
 
@@ -5292,15 +5314,47 @@ const ChartsSection = () => {
           {activeTab === 'preview' && <ErrorBoundary sectionName="Preview"><PreviewSection /></ErrorBoundary>}
           {activeTab === 'stats' && <ErrorBoundary sectionName="Stats"><StatsSection /></ErrorBoundary>}
           {activeTab === 'charts' && <ErrorBoundary sectionName="Charts"><ChartsSection /></ErrorBoundary>}
-          {activeTab === 'cleaning' && <ErrorBoundary sectionName="Cleaning"><CleaningSection /></ErrorBoundary>}
-          {activeTab === 'pivot' && <ErrorBoundary sectionName="Pivot"><PivotSection /></ErrorBoundary>}
+          {activeTab === 'cleaning' && (
+            <FeatureGate feature="dataCleaning">
+              <ErrorBoundary sectionName="Cleaning"><CleaningSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
+          {activeTab === 'pivot' && (
+            <FeatureGate feature="pivotTables">
+              <ErrorBoundary sectionName="Pivot"><PivotSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
           {activeTab === 'eda' && <ErrorBoundary sectionName="EDA"><EdaSection /></ErrorBoundary>}
-          {activeTab === 'chat' && <ErrorBoundary sectionName="Chat"><ChatSection /></ErrorBoundary>}
-          {activeTab === 'sql' && <ErrorBoundary sectionName="SQL"><SqlSection /></ErrorBoundary>}
-          {activeTab === 'ml' && <ErrorBoundary sectionName="ML Lab"><MLLabSection /></ErrorBoundary>}
-          {activeTab === 'pipeline' && <ErrorBoundary sectionName="Pipeline"><PipelineSection /></ErrorBoundary>}
-          {activeTab === 'dashboard' && <ErrorBoundary sectionName="Dashboard"><DashboardSection /></ErrorBoundary>}
-          {activeTab === 'auto-analyst' && <ErrorBoundary sectionName="Auto-Analyst"><AutoAnalystSection /></ErrorBoundary>}
+          {activeTab === 'chat' && (
+            <FeatureGate feature="chat">
+              <ErrorBoundary sectionName="Chat"><ChatSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
+          {activeTab === 'sql' && (
+            <FeatureGate feature="sqlEngine">
+              <ErrorBoundary sectionName="SQL"><SqlSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
+          {activeTab === 'ml' && (
+            <FeatureGate feature="mlLab">
+              <ErrorBoundary sectionName="ML Lab"><MLLabSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
+          {activeTab === 'pipeline' && (
+            <FeatureGate feature="pipeline">
+              <ErrorBoundary sectionName="Pipeline"><PipelineSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
+          {activeTab === 'dashboard' && (
+            <FeatureGate feature="dashboard">
+              <ErrorBoundary sectionName="Dashboard"><DashboardSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
+          {activeTab === 'auto-analyst' && (
+            <FeatureGate feature="autoAnalyst">
+              <ErrorBoundary sectionName="Auto-Analyst"><AutoAnalystSection /></ErrorBoundary>
+            </FeatureGate>
+          )}
         </div>
       </div>
 
@@ -5648,5 +5702,13 @@ const ChartsSection = () => {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrandConfigProvider>
+      <MainApp />
+    </BrandConfigProvider>
   );
 }

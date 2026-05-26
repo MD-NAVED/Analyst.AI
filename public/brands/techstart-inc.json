@@ -1,0 +1,52 @@
+{
+  "appName": "TechStart Insights",
+  "appTagline": "Velocity-Driven Intelligence",
+  "favicon": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2310B981'/><polygon points='30,70 50,30 70,70' fill='white'/></svg>",
+  "logo": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 60'><rect width='200' height='60' rx='10' fill='%2310B981'/><polygon points='20,45 35,15 50,45' fill='white'/><text x='65' y='36' fill='white' font-family='sans-serif' font-size='16' font-weight='bold'>TECHSTART</text></svg>",
+  "logoWidth": 160,
+  "colors": {
+    "primary": "#10B981",
+    "primaryHover": "#059669",
+    "accent": "#06B6D4",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "danger": "#EF4444",
+    "bg": "#06090E",
+    "surface": "#0C131F",
+    "surfaceHover": "#142033",
+    "border": "#1A2E4C",
+    "textPrimary": "#F3F4F6",
+    "textSecondary": "#9CA3AF",
+    "textMuted": "#4B5563"
+  },
+  "fontFamily": "'Segoe UI', Roboto, sans-serif",
+  "fontMono": "monospace",
+  "features": {
+    "chat": true,
+    "mlLab": true,
+    "dashboard": true,
+    "sqlEngine": true,
+    "autoAnalyst": true,
+    "pdfExport": true,
+    "excelExport": true,
+    "dataCleaning": true,
+    "pivotTables": true,
+    "pipeline": true
+  },
+  "ui": {
+    "sidebarDefaultOpen": false,
+    "showGithubLink": false,
+    "showPoweredBy": true,
+    "defaultTab": "upload",
+    "maxFileSizeMB": 150,
+    "chartAnimationDuration": 800,
+    "enableTour": true
+  },
+  "client": {
+    "id": "client-002",
+    "name": "TechStart Inc",
+    "supportEmail": "hello@techstart.io",
+    "supportPhone": "+1-888-555-9000",
+    "customDomain": "bi.techstart.io"
+  }
+}

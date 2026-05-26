@@ -1,0 +1,52 @@
+{
+  "appName": "DataLens AI",
+  "appTagline": "AI-Powered Data Analytics Suite",
+  "favicon": "/favicon.svg",
+  "logo": "/favicon.svg",
+  "logoWidth": 140,
+  "colors": {
+    "primary": "#6366F1",
+    "primaryHover": "#4F46E5",
+    "accent": "#8B5CF6",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "danger": "#EF4444",
+    "bg": "#070B14",
+    "surface": "#0D1117",
+    "surfaceHover": "#111827",
+    "border": "#1E2D3D",
+    "textPrimary": "#F1F5F9",
+    "textSecondary": "#94A3B8",
+    "textMuted": "#475569"
+  },
+  "fontFamily": "'Outfit', 'Inter', system-ui, sans-serif",
+  "fontMono": "'JetBrains Mono', monospace",
+  "features": {
+    "chat": true,
+    "mlLab": true,
+    "dashboard": true,
+    "sqlEngine": true,
+    "autoAnalyst": true,
+    "pdfExport": true,
+    "excelExport": true,
+    "dataCleaning": true,
+    "pivotTables": true,
+    "pipeline": true
+  },
+  "ui": {
+    "sidebarDefaultOpen": true,
+    "showGithubLink": true,
+    "showPoweredBy": false,
+    "defaultTab": "upload",
+    "maxFileSizeMB": 100,
+    "chartAnimationDuration": 1500,
+    "enableTour": true
+  },
+  "client": {
+    "id": "datalens-default",
+    "name": "DataLens Systems",
+    "supportEmail": "support@datalens.ai",
+    "supportPhone": "+1-800-555-0100",
+    "customDomain": "datalens.ai"
+  }
+}
