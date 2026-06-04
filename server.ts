@@ -6,11 +6,15 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import rateLimit from 'express-rate-limit';
+import fs from 'fs';
+import crypto from 'crypto';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const _dirname = typeof __filename !== 'undefined'
+  ? path.dirname(__filename)
+  : path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
@@ -20,7 +24,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com;");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com ws: wss:;");
   next();
 });
 
@@ -78,11 +82,174 @@ function sanitize(input: any): any {
   return input;
 }
 
+// --- AUTHENTICATION ENGINE (Option A) ---
+const USERS_FILE = path.join(process.cwd(), 'users.json');
+let inMemoryUsers: any[] = [];
+
+function readUsers(): any[] {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn("Could not read users.json, falling back to memory store.", e);
+  }
+  return inMemoryUsers;
+}
+
+function writeUsers(users: any[]) {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  } catch (e) {
+    console.warn("Could not write users.json, keeping in memory only.", e);
+  }
+  inMemoryUsers = users;
+}
+
+// Initialize in-memory store on start if users.json exists
+try {
+  if (fs.existsSync(USERS_FILE)) {
+    inMemoryUsers = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+  }
+} catch (e) {}
+
+// Native crypto helpers
+function hashPassword(password: string): string {
+  const salt = 'datalens_secure_salt_123';
+  return crypto.createHmac('sha256', salt).update(password).digest('hex');
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || 'datalens_default_jwt_secret_xyz_789';
+
+function generateToken(payload: any): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + 24 * 60 * 60 * 1000 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${signature}`;
+}
+
+function verifyToken(token: string): any | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [header, body, signature] = parts;
+    
+    const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64url');
+    if (signature !== expectedSig) return null;
+    
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8'));
+    if (parsed.exp < Date.now()) return null;
+    
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Auth token verification middleware
+function authenticateToken(req: any, res: any, next: any) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access Denied: Missing authentication token.' });
+  }
+
+  const user = verifyToken(token);
+  if (!user) {
+    return res.status(401).json({ error: 'Access Denied: Invalid or expired authentication token.' });
+  }
+
+  req.user = user;
+  next();
+}
+
+// Auth Routes
+app.post('/api/auth/register', (req, res) => {
+  try {
+    const body = sanitize(req.body);
+    const { email, password, name, brandId } = body;
+
+    if (!email || !password || !name || !brandId) {
+      return res.status(400).json({ error: 'Missing required registration parameters.' });
+    }
+
+    const users = readUsers();
+    const existingUser = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.brandId === brandId);
+
+    if (existingUser) {
+      return res.status(400).json({ error: 'User is already registered for this workspace brand.' });
+    }
+
+    const newUser = {
+      id: `user-${Date.now()}`,
+      email: email.toLowerCase(),
+      passwordHash: hashPassword(password),
+      name,
+      brandId,
+      createdAt: new Date().toISOString()
+    };
+
+    users.push(newUser);
+    writeUsers(users);
+
+    const token = generateToken({ id: newUser.id, email: newUser.email, name: newUser.name, brandId: newUser.brandId });
+    res.status(201).json({
+      token,
+      user: { id: newUser.id, email: newUser.email, name: newUser.name, brandId: newUser.brandId }
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Error occurred during registration.' });
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const body = sanitize(req.body);
+    const { email, password, brandId } = body;
+
+    if (!email || !password || !brandId) {
+      return res.status(400).json({ error: 'Missing required login parameters.' });
+    }
+
+    const users = readUsers();
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.brandId === brandId);
+
+    if (!user || user.passwordHash !== hashPassword(password)) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const token = generateToken({ id: user.id, email: user.email, name: user.name, brandId: user.brandId });
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, name: user.name, brandId: user.brandId }
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Error occurred during login.' });
+  }
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access Denied: Missing authentication token.' });
+  }
+
+  const user = verifyToken(token);
+  if (!user) {
+    return res.status(401).json({ error: 'Access Denied: Invalid or expired authentication token.' });
+  }
+
+  res.json({ user });
+});
+
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// POST /api/analyze - Accepts single prompt or array of contents
-app.post('/api/analyze', async (req, res) => {
+// POST /api/analyze - Accepts single prompt or array of contents (Requires Bearer Auth)
+app.post('/api/analyze', authenticateToken, async (req, res) => {
   try {
     const body = sanitize(req.body);
     const { prompt, contents, model, temperature } = body;
@@ -123,8 +290,8 @@ app.post('/api/analyze', async (req, res) => {
   }
 });
 
-// POST /api/chat - Accepts messages array for multi-turn conversations
-app.post('/api/chat', async (req, res) => {
+// POST /api/chat - Accepts messages array for multi-turn conversations (Requires Bearer Auth)
+app.post('/api/chat', authenticateToken, async (req, res) => {
   try {
     const body = sanitize(req.body);
     const { messages, model, temperature } = body;
@@ -187,9 +354,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     // Serve production static assets
-    app.use(express.static(path.resolve(__dirname, '.')));
+    app.use(express.static(path.resolve(_dirname, '.')));
     app.get('*', (req, res) => {
-      res.sendFile(path.resolve(__dirname, 'index.html'));
+      res.sendFile(path.resolve(_dirname, 'index.html'));
     });
   }
 

@@ -30,6 +30,7 @@ import { useBrandConfig } from './config/useBrandConfig';
 import { FeatureGate } from './components/branding/FeatureGate';
 import { DynamicLogo } from './components/branding/DynamicLogo';
 import { DynamicFavicon } from './components/branding/DynamicFavicon';
+import { BrandLoader } from './components/branding/BrandLoader';
 
 
 // --- TYPES ---
@@ -219,9 +220,15 @@ const formatBytes = (bytes: number) => {
 const CHART_COLORS = ['#6366F1', '#22D3EE', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
 const callAI = async (payload: { contents?: any, prompt?: string, model?: string }) => {
+  const token = localStorage.getItem('datalens_auth_token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch('/api/analyze', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   
@@ -490,10 +497,193 @@ const calculateSilhouetteScore = (points: number[][], clusters: number[]): numbe
 };
 
 
+interface BrandedAuthPageProps {
+  onLogin: (user: any) => void;
+}
+
+const BrandedAuthPage: React.FC<BrandedAuthPageProps> = ({ onLogin }) => {
+  const { config, appName, appTagline } = useBrandConfig();
+  const [isRegister, setIsRegister] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password.trim() || (isRegister && !name.trim())) {
+      setError('Please fill in all required fields.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+    const payload = isRegister 
+      ? { email, password, name, brandId: config.client.id }
+      : { email, password, brandId: config.client.id };
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Authentication failed.');
+      }
+
+      localStorage.setItem('datalens_auth_token', data.token);
+      onLogin(data.user);
+    } catch (e: any) {
+      setError(e.message || 'Server connection error.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-4 bg-[var(--bg)] font-sans">
+      <div className="absolute inset-0 pointer-events-none opacity-20" style={{ background: 'radial-gradient(circle at top right, var(--primary), transparent 45%), radial-gradient(circle at bottom left, var(--accent), transparent 45%)' }}></div>
+      
+      <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-8 shadow-2xl relative overflow-hidden transition-all duration-300">
+        <div className="flex flex-col items-center text-center mb-8">
+          <div className="mb-4">
+            <DynamicLogo />
+          </div>
+          <p className="text-sm text-slate-400 font-medium">{appTagline}</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <h2 className="text-xl font-bold text-white mb-2 text-center">
+            {isRegister ? 'Create Account' : 'Welcome Back'}
+          </h2>
+
+          {error && (
+            <div className="p-3 bg-[rgba(239,68,68,0.1)] border border-[var(--danger)] text-[var(--danger)] rounded-lg text-xs font-semibold flex items-center gap-2">
+              <AlertCircle size={14} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {isRegister && (
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="John Doe"
+                className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
+                required
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Email Address</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@company.com"
+              className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn-primary w-full justify-center p-3 text-sm font-semibold rounded-lg mt-4 cursor-pointer"
+          >
+            {loading ? (
+              <RefreshCcw className="animate-spin" size={16} />
+            ) : isRegister ? (
+              'Sign Up'
+            ) : (
+              'Sign In'
+            )}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center text-xs text-muted">
+          {isRegister ? (
+            <>
+              Already have an account?{' '}
+              <button 
+                onClick={() => { setIsRegister(false); setError(''); }}
+                className="text-[var(--primary)] hover:underline font-semibold bg-transparent border-none cursor-pointer"
+              >
+                Sign In
+              </button>
+            </>
+          ) : (
+            <>
+              Don't have an account yet?{' '}
+              <button 
+                onClick={() => { setIsRegister(true); setError(''); }}
+                className="text-[var(--primary)] hover:underline font-semibold bg-transparent border-none cursor-pointer"
+              >
+                Sign Up
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ReactGridLayout = WidthProvider(GridLayout);
 
 function MainApp() {
   const { config, appName, appTagline, hasFeature } = useBrandConfig();
+  
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  
+  useEffect(() => {
+    const checkUser = async () => {
+      const token = localStorage.getItem('datalens_auth_token');
+      if (token) {
+        try {
+          const response = await fetch('/api/auth/me', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setCurrentUser(data.user);
+          } else {
+            localStorage.removeItem('datalens_auth_token');
+          }
+        } catch (e) {
+          console.error("Failed to verify user session", e);
+        }
+      }
+      setAuthLoading(false);
+    };
+    checkUser();
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'pivot' | 'eda' | 'chat' | 'sql' | 'ml' | 'dashboard' | 'pipeline' | 'auto-analyst'>('upload');
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
   const [data, setData] = useState<any[]>([]);
@@ -5153,6 +5343,14 @@ const ChartsSection = () => {
       XLSX.writeFile(workbook, `${filePrefix}_${activeTab}.xlsx`);
   };
 
+  if (authLoading) {
+    return <BrandLoader />;
+  }
+
+  if (!currentUser) {
+    return <BrandedAuthPage onLogin={(user: any) => setCurrentUser(user)} />;
+  }
+
   return (
     <div className="app-container" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove}>
       {/* Sidebar */}
@@ -5238,20 +5436,39 @@ const ChartsSection = () => {
             </>
           )}
 
-          <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-            System
-          </div>
-          <div className="px-4 pb-4 mt-2">
-            <button className="btn-secondary w-full text-xs justify-center hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--danger)] hover:border-[var(--danger)]" onClick={async () => {
-              if (confirm('Clear all saved session data? This cannot be undone.')) {
-                await clearSession();
+          <div className="px-4 py-2 mt-auto border-t border-[var(--border)] pt-4 text-xs text-muted flex flex-col gap-2.5">
+            <div className="flex items-center gap-2 bg-[rgba(255,255,255,0.01)] border border-[var(--border)] p-2 rounded-lg">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] text-white flex items-center justify-center font-bold text-xs uppercase shadow-sm shrink-0">
+                {currentUser?.name?.slice(0, 2)}
+              </div>
+              <div className="flex-1 truncate">
+                <div className="font-semibold text-white truncate">{currentUser?.name}</div>
+                <div className="text-[10px] opacity-75 truncate">{currentUser?.email}</div>
+              </div>
+            </div>
+            <button 
+              className="btn-secondary w-full text-xs justify-center gap-1.5 border-[var(--border)] cursor-pointer" 
+              onClick={async () => {
+                if (confirm('Clear all saved session data? This cannot be undone.')) {
+                  await clearSession();
+                  localStorage.removeItem('datalens_auth_token');
+                  window.location.reload();
+                }
+              }}
+            >
+              Clear Database
+            </button>
+            <button 
+              className="btn-secondary w-full text-xs justify-center gap-1.5 border-[var(--border)] hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--danger)] hover:border-[var(--danger)] cursor-pointer" 
+              onClick={() => {
+                localStorage.removeItem('datalens_auth_token');
                 window.location.reload();
-              }
-            }}>
-              <Trash2 size={14} /> Clear Session
+              }}
+            >
+              Log Out
             </button>
             {storageUsage && (
-              <div className="text-[10px] text-muted text-center mt-3 font-mono opacity-60">
+              <div className="text-[10px] text-muted text-center mt-1 font-mono opacity-60">
                 {storageUsage}
               </div>
             )}
