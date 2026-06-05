@@ -30,21 +30,37 @@ app.use((req, res, next) => {
 // 2. Request Body Limit (Max 100KB body parser size to prevent memory attacks)
 app.use(express.json({ limit: '100kb' }));
 
-// 3. Configurable CORS
-const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl) or matching allowed origin
-    if (!origin || origin === allowedOrigin || origin.startsWith('http://localhost:')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Blocked by CORS policy'));
-    }
-  },
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
-  credentials: true
-}));
+const allowedOrigin = process.env.FRONTEND_URL;
+const corsOptionsDelegate = (req: any, callback: any) => {
+  const origin = req.header('Origin');
+  const host = req.header('Host');
+  let corsOptions;
+  
+  let isSameOrigin = false;
+  if (origin && host) {
+    try {
+      const originUrl = new URL(origin);
+      isSameOrigin = originUrl.host === host;
+    } catch (e) {}
+  }
+  
+  const isLocalhost = origin && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'));
+  const isVercel = origin && origin.endsWith('.vercel.app');
+  const isAllowedEnv = origin && allowedOrigin && origin === allowedOrigin;
+
+  if (!origin || isSameOrigin || isLocalhost || isVercel || isAllowedEnv) {
+    corsOptions = { 
+      origin: true, 
+      credentials: true,
+      methods: ['GET', 'POST'],
+      allowedHeaders: ['Content-Type', 'Authorization']
+    };
+  } else {
+    corsOptions = { origin: false };
+  }
+  callback(null, corsOptions);
+};
+app.use(cors(corsOptionsDelegate));
 
 // 4. Rate Limiting (30 requests per minute per IP or configurable by env)
 const limitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60000;
