@@ -33,7 +33,6 @@
     "react-grid-layout": "^2.2.3",
     "react-is": "^19.2.6",
     "recharts": "^3.8.1",
-    "vite": "^6.2.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
