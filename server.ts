@@ -229,6 +229,91 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
+app.post('/api/auth/social-login', (req, res) => {
+  try {
+    const body = sanitize(req.body);
+    const { provider, brandId } = body;
+
+    if (!provider || !brandId) {
+      return res.status(400).json({ error: 'Missing provider or brandId.' });
+    }
+
+    const email = `${provider.toLowerCase()}.demo@datalens.ai`;
+    const name = `Naved (via ${provider})`;
+    const id = `user-${provider.toLowerCase()}-${Date.now()}`;
+
+    const users = readUsers();
+    let user = users.find(u => u.email === email && u.brandId === brandId);
+    if (!user) {
+      user = {
+        id,
+        email,
+        passwordHash: 'social-auth-password-hash',
+        name,
+        brandId,
+        createdAt: new Date().toISOString()
+      };
+      users.push(user);
+      writeUsers(users);
+    }
+
+    const token = generateToken({ id: user.id, email: user.email, name: user.name, brandId: user.brandId });
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, name: user.name, brandId: user.brandId }
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Error occurred during social authentication.' });
+  }
+});
+
+app.post('/api/auth/google-login', async (req, res) => {
+  try {
+    const body = sanitize(req.body);
+    const { accessToken, brandId } = body;
+
+    if (!accessToken || !brandId) {
+      return res.status(400).json({ error: 'Missing accessToken or brandId.' });
+    }
+
+    const googleRes = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`);
+    if (!googleRes.ok) {
+      return res.status(401).json({ error: 'Failed to verify Google access token.' });
+    }
+
+    const googleUser = await googleRes.json();
+    const { email, name, sub } = googleUser;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Google account does not provide an email address.' });
+    }
+
+    const users = readUsers();
+    let user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.brandId === brandId);
+    
+    if (!user) {
+      user = {
+        id: `user-google-${sub}`,
+        email: email.toLowerCase(),
+        passwordHash: 'google-oauth-managed',
+        name: name || 'Google User',
+        brandId,
+        createdAt: new Date().toISOString()
+      };
+      users.push(user);
+      writeUsers(users);
+    }
+
+    const token = generateToken({ id: user.id, email: user.email, name: user.name, brandId: user.brandId });
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, name: user.name, brandId: user.brandId }
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Error occurred during Google authentication.' });
+  }
+});
+
 app.get('/api/auth/me', (req, res) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];

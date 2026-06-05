@@ -65,3 +65,31 @@ DataLens AI is a premium, state-of-the-art data cleaning, insight generation, an
 - **Charts Engine**: Recharts (fully customized responsive Tooltips, Scatters, and Bars)
 - **PDF Engine**: jsPDF, html2canvas (configured with high-DPI scaling and dynamic layout checkers)
 - **AI Core**: `@google/genai` (Google Gemini SDK)
+
+---
+
+## 🌐 Enterprise Production Architecture (GCP)
+
+DataLens AI is designed to scale from local CSV file analysis to an enterprise-grade cloud analytics platform. Below is the blueprint of the serverless topology designed to deploy this platform on **Google Cloud Platform (GCP)**.
+
+```mermaid
+graph TD
+    User([User Browser]) -->|HTTPS| LB[Global HTTPS Load Balancer]
+    subgraph GCP_Cloud ["Google Cloud Platform"]
+        LB -->|Serverless NEG| CR[Cloud Run: DataLens App]
+        CR -->|Secrets Auth| SM[Secret Manager]
+        CR -->|SQL Proxy Connection| SQL[(Cloud SQL: PostgreSQL 15)]
+        CR -->|Analytics Data Streaming| BQ[(BigQuery: Dataset)]
+        CR -->|Advanced LLMs & Agents| Vertex[Vertex AI platform]
+        SQL -.->|Retrieve DB Password| SM
+    end
+```
+
+### ⚡ Architecture Breakdown
+* **Cloud Run (Serverless Compute)**: Hosts the Dockerized DataLens AI application, auto-scaling dynamically from 0 to 1000+ instances.
+* **Secret Manager**: Securely stores database passwords, API credentials, and JWT secrets, keeping them out of code repositories.
+* **Cloud SQL (PostgreSQL 15)**: Managed relational database instance storing persistent client metrics and user records.
+* **BigQuery**: Large-scale dataset analytics warehouse, allowing streaming queries of high-volume data.
+* **Vertex AI Platform**: Direct integration to advanced LLMs (Gemini Pro/Ultra) via secure, private interior GCP networking.
+* **Infrastructure as Code (IaC)**: Deploy and manage this entire infrastructure using **Terraform** blueprint configurations.
+

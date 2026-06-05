@@ -232,7 +232,15 @@ const callAI = async (payload: { contents?: any, prompt?: string, model?: string
     body: JSON.stringify(payload),
   });
   
-  const data = await response.json();
+  let data: any = {};
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    data = await response.json();
+  } else {
+    const text = await response.text();
+    throw new Error(text || `Server returned status ${response.status}`);
+  }
+  
   if (!response.ok) {
     throw new Error(data.error || 'API request failed');
   }
@@ -531,7 +539,62 @@ const BrandedAuthPage: React.FC<BrandedAuthPageProps> = ({ onLogin }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      const data = await response.json();
+      
+      let data: any = {};
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text || `Server returned status ${response.status}`);
+      }
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Authentication failed.');
+      }
+
+      localStorage.setItem('datalens_auth_token', data.token);
+      onLogin(data.user);
+    } catch (e: any) {
+      setError(e.message || 'Server connection error.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSocialLogin = async (provider: string) => {
+    if (provider === 'Google') {
+      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+      if (clientId && clientId.trim() !== '' && !clientId.includes('your_google_client_id')) {
+        const redirectUri = window.location.origin + window.location.pathname;
+        const scope = 'email profile';
+        const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+        window.location.href = googleAuthUrl;
+        return;
+      } else {
+        setError('Google Client ID is not configured in .env. Please set VITE_GOOGLE_CLIENT_ID to use real Google login.');
+        return;
+      }
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch('/api/auth/social-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, brandId: config.client.id })
+      });
+      
+      let data: any = {};
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text || `Server returned status ${response.status}`);
+      }
       
       if (!response.ok) {
         throw new Error(data.error || 'Authentication failed.');
@@ -572,9 +635,12 @@ const BrandedAuthPage: React.FC<BrandedAuthPageProps> = ({ onLogin }) => {
 
           {isRegister && (
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Name</label>
+              <label htmlFor="name" className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Name</label>
               <input
                 type="text"
+                id="name"
+                name="name"
+                autoComplete="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="John Doe"
@@ -585,9 +651,12 @@ const BrandedAuthPage: React.FC<BrandedAuthPageProps> = ({ onLogin }) => {
           )}
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Email Address</label>
+            <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Email Address</label>
             <input
               type="email"
+              id="email"
+              name="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@company.com"
@@ -597,9 +666,12 @@ const BrandedAuthPage: React.FC<BrandedAuthPageProps> = ({ onLogin }) => {
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Password</label>
+            <label htmlFor="password" className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Password</label>
             <input
               type="password"
+              id="password"
+              name="password"
+              autoComplete={isRegister ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
@@ -622,6 +694,58 @@ const BrandedAuthPage: React.FC<BrandedAuthPageProps> = ({ onLogin }) => {
             )}
           </button>
         </form>
+
+        {!isRegister && (
+          <>
+            <div className="relative flex py-5 items-center">
+              <div className="flex-grow border-t border-[var(--border)]"></div>
+              <span className="flex-shrink mx-4 text-xs text-slate-400">Or continue with</span>
+              <div className="flex-grow border-t border-[var(--border)]"></div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <button 
+                type="button" 
+                disabled={loading}
+                onClick={() => handleSocialLogin('Google')}
+                className="flex flex-col items-center justify-center p-3 border border-[var(--border)] rounded-xl bg-[var(--surfaceHover)] hover:bg-[var(--border)] transition-all duration-200 cursor-pointer text-xs text-white gap-2 font-medium disabled:opacity-50"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#EA4335" d="M12 5.04c1.62 0 3.08.56 4.22 1.65l3.15-3.15C17.45 1.76 14.96 1 12 1 7.35 1 3.39 3.67 1.45 7.57l3.8 2.95c.9-2.7 3.4-4.48 6.75-4.48z"/>
+                  <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.51h6.44c-.28 1.48-1.12 2.73-2.38 3.58l3.7 2.87c2.16-1.99 3.73-4.92 3.73-8.61z"/>
+                  <path fill="#FBBC05" d="M5.25 14.52c-.23-.69-.36-1.42-.36-2.18s.13-1.49.36-2.18L1.45 7.21C.65 8.81.18 10.6.18 12.5s.47 3.69 1.27 5.29l3.8-2.97z"/>
+                  <path fill="#34A853" d="M12 23c3.24 0 5.97-1.08 7.96-2.91l-3.7-2.87c-1.03.69-2.35 1.1-4.26 1.1-3.35 0-6.19-2.28-7.2-5.48l-3.8 2.95C3.15 19.8 7.14 23 12 23z"/>
+                </svg>
+                <span>Google</span>
+              </button>
+              <button 
+                type="button" 
+                disabled={loading}
+                onClick={() => handleSocialLogin('GitHub')}
+                className="flex flex-col items-center justify-center p-3 border border-[var(--border)] rounded-xl bg-[var(--surfaceHover)] hover:bg-[var(--border)] transition-all duration-200 cursor-pointer text-xs text-white gap-2 font-medium disabled:opacity-50"
+              >
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                  <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.167 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.137 20.164 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
+                </svg>
+                <span>GitHub</span>
+              </button>
+              <button 
+                type="button" 
+                disabled={loading}
+                onClick={() => handleSocialLogin('Microsoft')}
+                className="flex flex-col items-center justify-center p-3 border border-[var(--border)] rounded-xl bg-[var(--surfaceHover)] hover:bg-[var(--border)] transition-all duration-200 cursor-pointer text-xs text-white gap-2 font-medium disabled:opacity-50"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 23 23">
+                  <path fill="#F25022" d="M0 0h11v11H0z"/>
+                  <path fill="#7FBA00" d="M12 0h11v11H12z"/>
+                  <path fill="#00A4EF" d="M0 12h11v11H0z"/>
+                  <path fill="#FFB900" d="M12 12h11v11H12z"/>
+                </svg>
+                <span>Microsoft</span>
+              </button>
+            </div>
+          </>
+        )}
 
         <div className="mt-6 text-center text-xs text-muted">
           {isRegister ? (
@@ -683,6 +807,51 @@ function MainApp() {
     };
     checkUser();
   }, []);
+
+  useEffect(() => {
+    const handleGoogleHash = async () => {
+      if (window.location.hash) {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get('access_token');
+        if (accessToken) {
+          // Clean the hash from address bar
+          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+          
+          setAuthLoading(true);
+          try {
+            const brandId = config?.client?.id || 'datalens-default';
+            const response = await fetch('/api/auth/google-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ accessToken, brandId })
+            });
+            
+            let data: any = {};
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+              data = await response.json();
+            } else {
+              const text = await response.text();
+              throw new Error(text || `Server returned status ${response.status}`);
+            }
+            
+            if (response.ok) {
+              localStorage.setItem('datalens_auth_token', data.token);
+              setCurrentUser(data.user);
+            } else {
+              console.error("Google authentication failed:", data.error);
+            }
+          } catch (e) {
+            console.error("Error exchanging Google access token:", e);
+          } finally {
+            setAuthLoading(false);
+          }
+        }
+      }
+    };
+    handleGoogleHash();
+  }, [config]);
 
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'pivot' | 'eda' | 'chat' | 'sql' | 'ml' | 'dashboard' | 'pipeline' | 'auto-analyst'>('upload');
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
