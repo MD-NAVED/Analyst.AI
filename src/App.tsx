@@ -894,6 +894,7 @@ function MainApp() {
   const [parseProgress, setParseProgress] = useState({ percent: 0, stage: '', rows: 0, elapsed: 0, eta: 0 });
   const abortControllerRef = useRef<(() => void) | null>(null);
   const [strictMode, setStrictMode] = useState(false);
+  const [csvDelimiter, setCsvDelimiter] = useState<string>('auto');
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1826,50 +1827,53 @@ STRICT RULES:
         parsedData = await new Promise<any[]>((resolve, reject) => {
            let rows: any[] = [];
            let lastUpdate = Date.now();
-           
-           Papa.parse(file, {
-              header: true,
-              skipEmptyLines: true,
-              dynamicTyping: true,
-              chunk: (results, parser) => {
-                 if (isCanceled) {
-                    parser.abort();
-                    reject(new Error("Canceled"));
-                    return;
-                 }
-                 
-                 if (results.errors && results.errors.length > 0) {
-                     const hasFieldMismatch = results.errors.some(e => e.type === 'FieldMismatch');
-                     if (hasFieldMismatch) {
-                         parser.abort();
-                         reject(new Error("CSV validation failed: Inconsistent column count across rows."));
-                         return;
-                     }
-                 }
-                 
-                 rows.push(...(results.data as any[]));
-                 
-                 const now = Date.now();
-                 if (now - lastUpdate > 100) {
-                     lastUpdate = now;
-                     const percent = (results.meta.cursor / file.size) * 100;
-                     updateProgress('Parsing data...', percent, rows.length);
-                 }
-
-                 if (rows.length > 500000) {
+           const parseOptions: any = {
+               header: true,
+               skipEmptyLines: true,
+               dynamicTyping: true,
+               chunk: (results: any, parser: any) => {
+                  if (isCanceled) {
                      parser.abort();
-                     reject(new Error(`File validation failed: Contains ${rows.length.toLocaleString()} rows, exceeding the max limit of 500,000.`));
+                     reject(new Error("Canceled"));
                      return;
-                 }
-              },
-              complete: () => {
-                 updateProgress('Processing rows...', 100, rows.length);
-                 resolve(rows);
-              },
-              error: (error) => {
-                 reject(error);
-              }
-           });
+                  }
+                  
+                  if (results.errors && results.errors.length > 0) {
+                      const hasFieldMismatch = results.errors.some((e: any) => e.type === 'FieldMismatch');
+                      if (hasFieldMismatch) {
+                          parser.abort();
+                          reject(new Error("CSV validation failed: Inconsistent column count across rows."));
+                          return;
+                      }
+                  }
+                  
+                  rows.push(...(results.data as any[]));
+                  
+                  const now = Date.now();
+                  if (now - lastUpdate > 100) {
+                      lastUpdate = now;
+                      const percent = (results.meta.cursor / file.size) * 100;
+                      updateProgress('Parsing data...', percent, rows.length);
+                  }
+ 
+                  if (rows.length > 500000) {
+                      parser.abort();
+                      reject(new Error(`File validation failed: Contains ${rows.length.toLocaleString()} rows, exceeding the max limit of 500,000.`));
+                      return;
+                  }
+               },
+               complete: () => {
+                  updateProgress('Processing rows...', 100, rows.length);
+                  resolve(rows);
+               },
+               error: (error: any) => {
+                  reject(error);
+               }
+            };
+            if (csvDelimiter !== 'auto') {
+               parseOptions.delimiter = csvDelimiter;
+            }
+            Papa.parse(file, parseOptions);
         });
         
       } else if (extension === 'json') {
@@ -1991,68 +1995,144 @@ STRICT RULES:
     };
 
     return (
-      <div className="fade-in-up stagger-1 h-full flex flex-col justify-center max-w-3xl mx-auto w-full">
+      <div className="fade-in-up stagger-1 h-full flex flex-col justify-center max-w-6xl mx-auto w-full px-4 py-8">
         <div className="text-center mb-8">
-          <h1 className="mb-4">Upload Dataset</h1>
-          <p className="text-muted text-lg">Drop your CSV, Excel, or JSON file to start analysis</p>
+          <h1 className="mb-2 text-3xl font-bold tracking-tight">Data Operations Control Center</h1>
+          <p className="text-slate-400 text-sm">Upload datasets, configure ingestion rules, or load demo environments.</p>
         </div>
         
-        <label 
-          className={`drop-zone ${isDragging ? 'active' : ''}`}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        >
-          <input type="file" className="hidden" accept=".csv,.xlsx,.xls,.json" onChange={handleFileChange} />
-          <div className="upload-icon-container">
-            <Upload size={32} />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left Column - Ingestion Controls (7 cols) */}
+          <div className="lg:col-span-7 flex flex-col gap-6">
+            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
+              <h3 className="text-base font-semibold mb-4 text-emerald-400 flex items-center gap-2">
+                <Upload size={16} /> File Ingestion Dropzone
+              </h3>
+              <label 
+                className={`drop-zone ${isDragging ? 'active' : ''} border-2 border-dashed border-slate-700 hover:border-emerald-500/50 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 bg-slate-950/20`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <input type="file" className="hidden" accept=".csv,.xlsx,.xls,.json" onChange={handleFileChange} />
+                <div className="upload-icon-container mb-4 w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700/60 text-slate-400 transition-colors">
+                  <Upload size={20} />
+                </div>
+                <h4 className="text-sm font-semibold mb-1 text-slate-200">Click or drag file to this area</h4>
+                <p className="text-xs text-slate-400 text-center mb-4">Max file size 100MB. Supports CSV, XLSX, JSON format.</p>
+                
+                <div className="flex gap-3">
+                  <span className="bg-slate-950/50 text-slate-400 border-slate-800/80 font-mono text-[10px] font-semibold px-2 py-0.5 rounded border">CSV</span>
+                  <span className="bg-slate-950/50 text-slate-400 border-slate-800/80 font-mono text-[10px] font-semibold px-2 py-0.5 rounded border">XLSX</span>
+                  <span className="bg-slate-950/50 text-slate-400 border-slate-800/80 font-mono text-[10px] font-semibold px-2 py-0.5 rounded border">JSON</span>
+                </div>
+              </label>
+            </div>
+
+            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
+              <h3 className="text-base font-semibold mb-4 text-emerald-400 flex items-center gap-2">
+                <Settings size={16} /> Advanced Parser Settings
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">CSV Delimiter</label>
+                  <select 
+                    value={csvDelimiter} 
+                    onChange={(e) => setCsvDelimiter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 outline-none focus:border-emerald-500/50 transition-colors cursor-pointer"
+                  >
+                    <option value="auto">Auto-detect Delimiter</option>
+                    <option value=",">Comma ( , )</option>
+                    <option value=";">Semicolon ( ; )</option>
+                    <option value="&#9;">Tab ( \t )</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Parser Constraints</label>
+                  <label className="flex items-center gap-2.5 cursor-pointer bg-slate-950 border border-slate-800/60 p-2.5 rounded-lg hover:border-emerald-500/30 transition-colors w-full">
+                    <input 
+                      type="checkbox" 
+                      checked={strictMode}
+                      onChange={(e) => setStrictMode(e.target.checked)}
+                      className="accent-emerald-500 w-4 h-4 cursor-pointer align-middle rounded"
+                    />
+                    <span className="text-xs text-slate-300 font-medium leading-none">Strict Mode (skip null rows)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
-          <h3 className="mb-2">Click or drag file to this area</h3>
-          <p className="text-xs text-slate-400 font-medium mb-6">Support for a single file upload. Maximum file size 100MB.</p>
-          
-          <div className="flex gap-4 mt-4">
-            <div className="bg-slate-800 text-slate-200 border-slate-700/60 font-semibold px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wide border flex items-center gap-1.5 shadow-sm"><FileText size={12} className="text-slate-400" /> CSV</div>
-            <div className="bg-emerald-950/80 text-emerald-300 border-emerald-800/60 font-semibold px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wide border flex items-center gap-1.5 shadow-sm"><FileSpreadsheet size={12} className="text-emerald-400" /> XLSX</div>
-            <div className="bg-amber-950/80 text-amber-300 border-amber-800/60 font-semibold px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wide border flex items-center gap-1.5 shadow-sm"><FileJson size={12} className="text-amber-400" /> JSON</div>
+
+          {/* Right Column - Status & Templates (5 cols) */}
+          <div className="lg:col-span-5 flex flex-col gap-6">
+            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
+              <h3 className="text-base font-semibold mb-4 text-emerald-400 flex items-center gap-2">
+                <Zap size={16} /> Operations Overview
+              </h3>
+              <div className="flex flex-col gap-3 font-mono text-xs">
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400">Core Engine</span>
+                  <span className="text-emerald-400 flex items-center gap-1.5 font-bold"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ONLINE</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400">AI Proxy</span>
+                  <span className="text-emerald-400 font-bold">CONNECTED</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400">Memory Allocation</span>
+                  <span className="text-slate-200">OPTIMIZED</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
+                  <span className="text-slate-400">CORS Policy</span>
+                  <span className="text-slate-200">DYNAMIC</span>
+                </div>
+                <div className="flex justify-between items-center py-1.5">
+                  <span className="text-slate-400">Security Ingestion</span>
+                  <span className="text-emerald-400 font-bold">ACTIVE</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
+              <h3 className="text-base font-semibold mb-3 text-emerald-400 flex items-center gap-2">
+                <Sparkles size={16} /> Load Demo Environment
+              </h3>
+              <p className="text-xs text-slate-400 mb-4 leading-relaxed">Don't have a dataset ready? Load our pre-configured sales sandbox instantly to explore charts and insights.</p>
+              <button 
+                onClick={loadSampleSalesDataset}
+                className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-xs"
+              >
+                <Sparkles size={14} /> Ingest Sample Sales Data
+              </button>
+            </div>
           </div>
-        </label>
-        
-        <div className="flex justify-center mt-6">
-          <label className="flex items-center justify-center gap-2.5 cursor-pointer select-none py-1.5 px-3 rounded-lg hover:bg-[rgba(255,255,255,0.02)] transition-colors">
-            <input 
-              type="checkbox" 
-              checked={strictMode}
-              onChange={(e) => setStrictMode(e.target.checked)}
-              className="accent-[var(--primary)] w-4 h-4 cursor-pointer align-middle rounded"
-            />
-            <span className="text-sm text-slate-300 font-medium leading-none">Enable Strict Mode (reject nulls/empty strings)</span>
-          </label>
         </div>
 
+        {/* Loading Progress Section */}
         {loading && (
-          <div className="mt-8">
+          <div className="mt-8 card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm max-w-6xl w-full">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-medium">{parseProgress.stage || 'Processing Data...'}</span>
-              <span className="mono-text text-sm" style={{color: 'var(--primary)'}}>{parseProgress.percent}%</span>
+              <span className="text-sm font-semibold text-slate-200">{parseProgress.stage || 'Ingesting Data...'}</span>
+              <span className="mono-text text-sm text-emerald-400 font-bold">{parseProgress.percent}%</span>
             </div>
-            <div className="progress-container mb-2">
-              <div className="progress-fill transition-all duration-200" style={{width: `${parseProgress.percent}%`}}></div>
+            <div className="progress-container mb-3 h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+              <div className="progress-fill transition-all duration-200 h-full bg-emerald-500" style={{width: `${parseProgress.percent}%`}}></div>
             </div>
             <div className="flex justify-between items-center text-xs text-[#94A3B8] font-mono">
-                <div className="flex gap-4">
-                    <span>Rows: {parseProgress.rows.toLocaleString()}</span>
-                    <span>Elapsed: {parseProgress.elapsed}s</span>
-                    {parseProgress.eta > 0 && <span>ETA: {parseProgress.eta}s</span>}
-                </div>
-                <button 
-                  onClick={(e) => {
-                     e.stopPropagation();
-                     abortControllerRef.current?.();
-                  }} 
-                  className="px-3 py-1 rounded bg-[rgba(239,68,68,0.1)] text-[var(--danger)] border border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.2)] transition-colors z-10 relative cursor-pointer"
-                >
-                  Cancel
-                </button>
+              <div className="flex gap-4">
+                <span>Rows: {parseProgress.rows.toLocaleString()}</span>
+                <span>Elapsed: {parseProgress.elapsed}s</span>
+                {parseProgress.eta > 0 && <span>ETA: {parseProgress.eta}s</span>}
+              </div>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  abortControllerRef.current?.();
+                }} 
+                className="px-3 py-1 rounded bg-[rgba(239,68,68,0.1)] text-red-400 border border-red-500/20 hover:bg-[rgba(239,68,68,0.2)] transition-colors z-10 relative cursor-pointer font-sans"
+              >
+                Cancel Ingestion
+              </button>
             </div>
           </div>
         )}
