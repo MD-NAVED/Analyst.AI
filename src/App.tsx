@@ -226,7 +226,7 @@ const callAI = async (payload: { contents?: any, prompt?: string, model?: string
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch('/api/analyze', {
+  const response = await fetch('/api/gemini', {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),

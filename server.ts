@@ -348,8 +348,8 @@ app.get('/api/auth/me', (req, res) => {
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-// POST /api/analyze - Accepts single prompt or array of contents (Requires Bearer Auth)
-app.post('/api/analyze', authenticateToken, async (req, res) => {
+// POST /api/gemini - Accepts single prompt or array of contents (Requires Bearer Auth)
+app.post('/api/gemini', authenticateToken, async (req, res) => {
   try {
     const body = sanitize(req.body);
     const { prompt, contents, model, temperature } = body;
