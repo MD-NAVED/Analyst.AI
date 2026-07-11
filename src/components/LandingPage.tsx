@@ -43,219 +43,232 @@ const sparklineMock = [
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, appTagline }) => {
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F8FAFC] text-slate-900 font-sans flex flex-col justify-between relative overflow-x-hidden">
-      {/* Background soft glowing gradients */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-blue-200/40 to-indigo-200/30 blur-[120px] pointer-events-none"></div>
-      <div className="absolute top-[20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-gradient-to-bl from-purple-200/30 to-blue-100/20 blur-[140px] pointer-events-none"></div>
-
-      {/* Header / Navbar */}
-      <header className="sticky top-0 z-40 bg-white/70 backdrop-blur-md border-b border-slate-200/60 transition-all flex-shrink-0">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+    <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#F8FAFC] text-slate-900 font-sans relative overflow-x-hidden">
+      
+      {/* ─── LEFT HALF: Brand Branding, Hero Callout & Features (Light Theme) ─── */}
+      <div className="w-full lg:w-1/2 min-h-screen bg-white flex flex-col justify-between p-6 sm:p-12 relative z-20">
+        
+        {/* Left Half Header */}
+        <header className="flex items-center justify-between w-full mb-8 lg:mb-0">
           <div className="flex items-center gap-2">
             <DynamicLogo />
           </div>
+          <button 
+            onClick={() => onStartAuth('login')}
+            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-sm hover:shadow-md transition-all cursor-pointer"
+          >
+            Log In
+          </button>
+        </header>
+
+        {/* Left Half Content (Centered vertically on desktop) */}
+        <div className="my-auto max-w-xl mx-auto lg:mx-0 w-full flex flex-col justify-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-xs font-semibold text-blue-600 mb-5 w-fit shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+            Real-time Analytics
+          </div>
           
-          <div className="flex items-center gap-4">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 leading-tight mb-4">
+            Transform Data <br className="hidden sm:inline" />
+            Into <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Actionable Insights</span>
+          </h1>
+          
+          <p className="text-slate-500 text-sm md:text-base mb-6 leading-relaxed">
+            {appTagline || "Powerful analytics dashboard that helps you understand your business metrics, track KPIs, and make data-driven decisions in real-time."}
+          </p>
+          
+          <div className="flex mb-8">
             <button 
-              onClick={() => onStartAuth('login')}
-              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-sm hover:shadow-md transition-all cursor-pointer"
+              onClick={() => onStartAuth('register')}
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer text-sm w-full sm:w-auto group"
             >
-              Log In
+              Get Started
+              <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
-        </div>
-      </header>
 
-      {/* Main Single-Screen Hero Layout */}
-      <main className="max-w-7xl w-full mx-auto px-6 flex-1 flex items-center py-6 lg:py-0 overflow-y-auto lg:overflow-hidden">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16 items-center w-full my-auto">
-          
-          {/* Hero Left Column: Header text + Action CTA + Embedded features */}
-          <div className="lg:col-span-6 flex flex-col items-start text-left lg:pr-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-xs font-semibold text-blue-600 mb-5 shadow-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-              Real-time Analytics
-            </div>
-            
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 leading-tight mb-4">
-              Transform Data <br className="hidden sm:inline" />
-              Into <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Actionable Insights</span>
-            </h1>
-            
-            <p className="text-slate-500 text-sm md:text-base max-w-xl mb-6 leading-relaxed">
-              {appTagline || "Powerful analytics dashboard that helps you understand your business metrics, track KPIs, and make data-driven decisions in real-time."}
-            </p>
-            
-            <div className="flex flex-wrap gap-4 mb-8 w-full sm:w-auto">
-              <button 
-                onClick={() => onStartAuth('register')}
-                className="flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold px-6 py-3 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer text-sm w-full sm:w-auto group"
-              >
-                Get Started
-                <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-              </button>
+          {/* Embedded Features Layout */}
+          <div className="grid grid-cols-3 gap-4 w-full pt-6 border-t border-slate-200/80">
+            {/* Feature 1 */}
+            <div className="flex flex-col gap-1.5">
+              <div className="w-7 h-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500">
+                <Sparkles size={14} />
+              </div>
+              <h4 className="text-xs font-extrabold text-slate-800 leading-tight">AI Auto-Analyst</h4>
+              <p className="text-[10px] text-slate-400 font-medium leading-normal">Instant statistics & executive audits.</p>
             </div>
 
-            {/* Embedded Features Layout (Centered/Balanced) */}
-            <div className="grid grid-cols-3 gap-4 w-full pt-5 border-t border-slate-200/80">
-              {/* Feature 1 */}
-              <div className="flex flex-col gap-1.5">
-                <div className="w-7 h-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500">
-                  <Sparkles size={14} />
-                </div>
-                <h4 className="text-xs font-extrabold text-slate-800 leading-tight">AI Auto-Analyst</h4>
-                <p className="text-[10px] text-slate-400 font-medium leading-normal">Instant statistics & executive audits.</p>
+            {/* Feature 2 */}
+            <div className="flex flex-col gap-1.5">
+              <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-500">
+                <Wand2 size={14} />
               </div>
-
-              {/* Feature 2 */}
-              <div className="flex flex-col gap-1.5">
-                <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-500">
-                  <Wand2 size={14} />
-                </div>
-                <h4 className="text-xs font-extrabold text-slate-800 leading-tight">Data Cleaning</h4>
-                <p className="text-[10px] text-slate-400 font-medium leading-normal">Detect outliers & remove duplicate rows.</p>
-              </div>
-
-              {/* Feature 3 */}
-              <div className="flex flex-col gap-1.5">
-                <div className="w-7 h-7 rounded-lg bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-500">
-                  <PieChart size={14} />
-                </div>
-                <h4 className="text-xs font-extrabold text-slate-800 leading-tight">Visual Reports</h4>
-                <p className="text-[10px] text-slate-400 font-medium leading-normal">Interactive charts with PDF exports.</p>
-              </div>
+              <h4 className="text-xs font-extrabold text-slate-800 leading-tight">Data Cleaning</h4>
+              <p className="text-[10px] text-slate-400 font-medium leading-normal">Detect outliers & remove duplicate rows.</p>
             </div>
-            
-          </div>
 
-          {/* Hero Right Column: Compact Mock Dashboard */}
-          <div className="lg:col-span-6 relative flex items-center justify-center lg:justify-end">
-            {/* Decorative background glow under mock */}
-            <div className="absolute inset-0 bg-gradient-to-tr from-blue-400/20 to-purple-400/20 rounded-3xl blur-3xl pointer-events-none transform scale-90 translate-x-4 translate-y-4"></div>
-
-            {/* Dashboard Wrapper */}
-            <div className="w-full max-w-[480px] lg:max-w-[460px] xl:max-w-[500px] bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xl relative overflow-visible select-none animate-fadeIn">
-              
-              {/* Mock Dashboard Top controls */}
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="text-xs font-extrabold text-slate-800">Revenue & Users</h3>
-                  <div className="flex gap-2.5 text-[9px] text-slate-400 mt-0.5 font-bold">
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Revenue</span>
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span> Users</span>
-                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Growth</span>
-                  </div>
-                </div>
-                
-                {/* Growth indicator badge */}
-                <span className="bg-emerald-50 border border-emerald-100 text-emerald-600 text-[9px] font-bold px-2 py-0.5 rounded-full">
-                  +24.5%
-                </span>
+            {/* Feature 3 */}
+            <div className="flex flex-col gap-1.5">
+              <div className="w-7 h-7 rounded-lg bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-500">
+                <PieChart size={14} />
               </div>
-
-              {/* Main Area Chart (Ultra-compact) */}
-              <div className="h-[150px] w-full mb-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartDataMock} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-                    <defs>
-                      <linearGradient id="mockBlueGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.25}/>
-                        <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.01}/>
-                      </linearGradient>
-                      <linearGradient id="mockPurpGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.15}/>
-                        <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0.01}/>
-                      </linearGradient>
-                    </defs>
-                    <Area type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={2} fillOpacity={1} fill="url(#mockBlueGrad)" />
-                    <Area type="monotone" dataKey="users" stroke="#8B5CF6" strokeWidth={1} fillOpacity={1} fill="url(#mockPurpGrad)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Bottom 3 KPI Grid */}
-              <div className="grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
-                
-                {/* KPI Card 1: Users */}
-                <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2.5 flex flex-col justify-between h-[72px]">
-                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Users</div>
-                  <div className="flex justify-between items-baseline mt-0.5">
-                    <span className="text-xs font-black text-slate-800">8.5K</span>
-                  </div>
-                  <div className="h-4 w-full mt-0.5">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={sparklineMock}>
-                        <Line type="monotone" dataKey="val" stroke="#3B82F6" strokeWidth={1.2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* KPI Card 2: Sources */}
-                <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2.5 flex flex-col justify-between h-[72px]">
-                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Sources</div>
-                  <div className="flex items-center gap-1.5 mt-0.5 flex-1">
-                    <span className="text-xs font-black text-slate-800">80%</span>
-                    <svg className="w-6 h-6 transform -rotate-90 ml-auto" viewBox="0 0 36 36">
-                      <path className="text-slate-100" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                      <path className="text-indigo-500" strokeDasharray="80, 100" strokeWidth="3" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                    </svg>
-                  </div>
-                </div>
-
-                {/* KPI Card 3: Growth */}
-                <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2.5 flex flex-col justify-between h-[72px]">
-                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Growth</div>
-                  <div className="text-xs font-black text-slate-800 mt-0.5">+32%</div>
-                  <div className="flex gap-1 w-full mt-1.5">
-                    <span className="h-1 flex-1 rounded bg-[#10B981]"></span>
-                    <span className="h-1 flex-1 rounded bg-[#10B981]"></span>
-                    <span className="h-1 flex-1 rounded bg-[#10B981]"></span>
-                    <span className="h-1 flex-1 rounded bg-slate-200"></span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Floating Badge 1: Live Sync */}
-              <div className="absolute top-3 right-[-12px] bg-white border border-slate-200/80 rounded-xl shadow-lg py-1 px-2.5 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="text-[9px] font-extrabold text-slate-600">Live Sync</span>
-              </div>
-
-              {/* Floating Badge 2: Active Now */}
-              <div className="absolute bottom-[96px] right-[-16px] bg-white border border-slate-200/80 rounded-xl shadow-lg p-2 flex flex-col items-center">
-                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Active now</span>
-                <span className="text-xs font-black text-indigo-600">1,247</span>
-              </div>
-
-              {/* Floating Notification Badge: Milestone */}
-              <div className="absolute bottom-[-12px] left-4 bg-white border border-slate-200/80 rounded-xl shadow-lg py-1.5 px-2.5 flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500 flex-shrink-0">
-                  <Bell size={12} className="animate-bounce" />
-                </div>
-                <div>
-                  <div className="text-[9px] font-black text-slate-800">New milestone!</div>
-                  <div className="text-[8px] text-slate-400 font-bold mt-0.5">10K Users reached</div>
-                </div>
-              </div>
-
+              <h4 className="text-xs font-extrabold text-slate-800 leading-tight">Visual Reports</h4>
+              <p className="text-[10px] text-slate-400 font-medium leading-normal">Interactive charts with PDF exports.</p>
             </div>
           </div>
         </div>
-      </main>
 
-      {/* Thin Footer Spanning Bottom */}
-      <footer className="bg-white border-t border-slate-200/60 py-4 flex-shrink-0">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row justify-between items-center gap-3">
-          <div className="flex items-center gap-2">
-            <DynamicLogo />
-          </div>
+        {/* Left Half Footer */}
+        <footer className="mt-8 lg:mt-0 pt-4 border-t border-slate-100 lg:border-none flex items-center justify-between">
           <div className="text-[10px] text-slate-400 font-bold font-mono">
             &copy; {new Date().getFullYear()} {appName}. All rights reserved.
           </div>
-        </div>
-      </footer>
+        </footer>
+      </div>
 
+      {/* ─── ANIMATED SEPARATOR LINE (Desktop: Vertical, Mobile: Horizontal) ─── */}
+      {/* Vertical separator */}
+      <div className="hidden lg:block absolute top-0 bottom-0 left-1/2 w-[1px] bg-slate-100 z-30">
+        <div 
+          className="w-[3px] h-32 bg-gradient-to-b from-transparent via-purple-500 to-transparent absolute left-[-1px] animate-flowLine"
+          style={{ animation: 'flowLine 3.5s infinite linear' }}
+        ></div>
+      </div>
+      {/* Horizontal separator */}
+      <div className="block lg:hidden w-full h-[1px] bg-slate-100 relative z-30 my-2">
+        <div 
+          className="h-[3px] w-32 bg-gradient-to-r from-transparent via-purple-500 to-transparent absolute top-[-1px] animate-flowLineHorizontal"
+          style={{ animation: 'flowLineHorizontal 3.5s infinite linear' }}
+        ></div>
+      </div>
+
+      {/* ─── RIGHT HALF: Dark Mode Visual Graphic (Premium Dark Theme) ─── */}
+      <div className="w-full lg:w-1/2 min-h-screen bg-[#070913] flex items-center justify-center p-6 sm:p-12 relative overflow-hidden z-20">
+        
+        {/* Soft glowing ambient spots under dashboard mock */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-blue-900/25 to-purple-900/30 rounded-3xl blur-3xl pointer-events-none transform scale-90"></div>
+        <div className="absolute top-[20%] left-[20%] w-[60%] h-[60%] rounded-full bg-gradient-to-br from-[#7C3AED]/10 to-indigo-900/20 blur-[120px] pointer-events-none"></div>
+
+        {/* Dashboard Wrapper */}
+        <div className="w-full max-w-[480px] lg:max-w-[440px] xl:max-w-[480px] bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xl relative overflow-visible select-none animate-fadeIn">
+          
+          {/* Mock Dashboard Top controls */}
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h3 className="text-xs font-extrabold text-slate-800">Revenue & Users</h3>
+              <div className="flex gap-2.5 text-[9px] text-slate-400 mt-0.5 font-bold">
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Revenue</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span> Users</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Growth</span>
+              </div>
+            </div>
+            
+            {/* Growth indicator badge */}
+            <span className="bg-emerald-50 border border-emerald-100 text-emerald-600 text-[9px] font-bold px-2 py-0.5 rounded-full">
+              +24.5%
+            </span>
+          </div>
+
+          {/* Main Area Chart (Ultra-compact) */}
+          <div className="h-[150px] w-full mb-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartDataMock} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="mockBlueGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.01}/>
+                  </linearGradient>
+                  <linearGradient id="mockPurpGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0.01}/>
+                  </linearGradient>
+                </defs>
+                <Area type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={2} fillOpacity={1} fill="url(#mockBlueGrad)" />
+                <Area type="monotone" dataKey="users" stroke="#8B5CF6" strokeWidth={1} fillOpacity={1} fill="url(#mockPurpGrad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Bottom 3 KPI Grid */}
+          <div className="grid grid-cols-3 gap-3 border-t border-slate-100 pt-3">
+            
+            {/* KPI Card 1: Users */}
+            <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2.5 flex flex-col justify-between h-[72px]">
+              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Users</div>
+              <div className="flex justify-between items-baseline mt-0.5">
+                <span className="text-xs font-black text-slate-800">8.5K</span>
+              </div>
+              <div className="h-4 w-full mt-0.5">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={sparklineMock}>
+                    <Line type="monotone" dataKey="val" stroke="#3B82F6" strokeWidth={1.2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* KPI Card 2: Sources */}
+            <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2.5 flex flex-col justify-between h-[72px]">
+              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Sources</div>
+              <div className="flex items-center gap-1.5 mt-0.5 flex-1">
+                <span className="text-xs font-black text-slate-800">80%</span>
+                <svg className="w-6 h-6 transform -rotate-90 ml-auto" viewBox="0 0 36 36">
+                  <path className="text-slate-100" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                  <path className="text-indigo-500" strokeDasharray="80, 100" strokeWidth="3" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                </svg>
+              </div>
+            </div>
+
+            {/* KPI Card 3: Growth */}
+            <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2.5 flex flex-col justify-between h-[72px]">
+              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Growth</div>
+              <div className="text-xs font-black text-slate-800 mt-0.5">+32%</div>
+              <div className="flex gap-1 w-full mt-1.5">
+                <span className="h-1 flex-1 rounded bg-[#10B981]"></span>
+                <span className="h-1 flex-1 rounded bg-[#10B981]"></span>
+                <span className="h-1 flex-1 rounded bg-[#10B981]"></span>
+                <span className="h-1 flex-1 rounded bg-slate-200"></span>
+              </div>
+            </div>
+          </div>
+
+          {/* Floating Badge 1: Live Sync */}
+          <div className="absolute top-3 right-[-12px] bg-white border border-slate-200/80 rounded-xl shadow-lg py-1 px-2.5 flex items-center gap-1.5 animate-bounce" style={{ animationDuration: '4s' }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-[9px] font-extrabold text-slate-600">Live Sync</span>
+          </div>
+
+          {/* Floating Badge 2: Active Now */}
+          <div className="absolute bottom-[96px] right-[-16px] bg-white border border-slate-200/80 rounded-xl shadow-lg p-2 flex flex-col items-center">
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Active now</span>
+            <span className="text-xs font-black text-indigo-600">1,247</span>
+          </div>
+
+          {/* Floating Notification Badge: Milestone */}
+          <div className="absolute bottom-[-12px] left-4 bg-white border border-slate-200/80 rounded-xl shadow-lg py-1.5 px-2.5 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500 flex-shrink-0">
+              <Bell size={12} className="animate-bounce" />
+            </div>
+            <div>
+              <div className="text-[9px] font-black text-slate-800">New milestone!</div>
+              <div className="text-[8px] text-slate-400 font-bold mt-0.5">10K Users reached</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* Dynamic Keyframe Animations Injection */}
+      <style>{`
+        @keyframes flowLine {
+          0% { top: -128px; }
+          100% { top: 100%; }
+        }
+        @keyframes flowLineHorizontal {
+          0% { left: -128px; }
+          100% { left: 100%; }
+        }
+      `}</style>
     </div>
   );
 };
