@@ -45,10 +45,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#F8FAFC] text-slate-900 font-sans relative overflow-x-hidden">
       
-      {/* ─── LEFT HALF: Brand Branding, Hero Callout & Features (Light Theme) ─── */}
-      <div className="w-full lg:w-1/2 min-h-screen bg-white flex flex-col justify-between p-6 sm:p-12 relative z-20">
+      {/* ─── LEFT COLUMN: Hero content, Action CTA & Features (60% Width) ─── */}
+      <div className="w-full lg:w-[60%] min-h-screen bg-white flex flex-col justify-between p-6 sm:p-12 relative z-20">
         
-        {/* Left Half Header */}
+        {/* Left Header */}
         <header className="flex items-center justify-between w-full mb-8 lg:mb-0">
           <div className="flex items-center gap-2">
             <DynamicLogo />
@@ -61,8 +61,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
           </button>
         </header>
 
-        {/* Left Half Content (Centered vertically on desktop) */}
-        <div className="my-auto max-w-xl mx-auto lg:mx-0 w-full flex flex-col justify-center">
+        {/* Left Content (Perfectly centered vertically in the 60% viewport) */}
+        <div className="my-auto max-w-2xl w-full mx-auto flex flex-col justify-center py-6 lg:py-12">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-xs font-semibold text-blue-600 mb-5 w-fit shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
             Real-time Analytics
@@ -73,7 +73,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
             Into <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Actionable Insights</span>
           </h1>
           
-          <p className="text-slate-500 text-sm md:text-base mb-6 leading-relaxed">
+          <p className="text-slate-500 text-sm md:text-base mb-6 max-w-xl leading-relaxed">
             {appTagline || "Powerful analytics dashboard that helps you understand your business metrics, track KPIs, and make data-driven decisions in real-time."}
           </p>
           
@@ -87,38 +87,46 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
             </button>
           </div>
 
-          {/* Embedded Features Layout */}
-          <div className="grid grid-cols-3 gap-4 w-full pt-6 border-t border-slate-200/80">
-            {/* Feature 1 */}
-            <div className="flex flex-col gap-1.5">
-              <div className="w-7 h-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500">
-                <Sparkles size={14} />
+          {/* Embedded Features Layout (Redesigned into Premium Cards Form) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full pt-6 border-t border-slate-200/80">
+            
+            {/* Feature 1 Card */}
+            <div className="p-4 rounded-xl border border-slate-200/60 bg-slate-50/40 hover:bg-white hover:shadow-lg hover:border-blue-500/20 transition-all duration-300 flex flex-col justify-between min-h-[128px]">
+              <div>
+                <div className="w-7 h-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500 mb-2.5">
+                  <Sparkles size={14} />
+                </div>
+                <h4 className="text-xs font-bold text-slate-800 leading-tight mb-1">AI Auto-Analyst</h4>
               </div>
-              <h4 className="text-xs font-extrabold text-slate-800 leading-tight">AI Auto-Analyst</h4>
               <p className="text-[10px] text-slate-400 font-medium leading-normal">Instant statistics & executive audits.</p>
             </div>
 
-            {/* Feature 2 */}
-            <div className="flex flex-col gap-1.5">
-              <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-500">
-                <Wand2 size={14} />
+            {/* Feature 2 Card */}
+            <div className="p-4 rounded-xl border border-slate-200/60 bg-slate-50/40 hover:bg-white hover:shadow-lg hover:border-blue-500/20 transition-all duration-300 flex flex-col justify-between min-h-[128px]">
+              <div>
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-500 mb-2.5">
+                  <Wand2 size={14} />
+                </div>
+                <h4 className="text-xs font-bold text-slate-800 leading-tight mb-1">Data Cleaning</h4>
               </div>
-              <h4 className="text-xs font-extrabold text-slate-800 leading-tight">Data Cleaning</h4>
               <p className="text-[10px] text-slate-400 font-medium leading-normal">Detect outliers & remove duplicate rows.</p>
             </div>
 
-            {/* Feature 3 */}
-            <div className="flex flex-col gap-1.5">
-              <div className="w-7 h-7 rounded-lg bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-500">
-                <PieChart size={14} />
+            {/* Feature 3 Card */}
+            <div className="p-4 rounded-xl border border-slate-200/60 bg-slate-50/40 hover:bg-white hover:shadow-lg hover:border-blue-500/20 transition-all duration-300 flex flex-col justify-between min-h-[128px]">
+              <div>
+                <div className="w-7 h-7 rounded-lg bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-500 mb-2.5">
+                  <PieChart size={14} />
+                </div>
+                <h4 className="text-xs font-bold text-slate-800 leading-tight mb-1">Visual Reports</h4>
               </div>
-              <h4 className="text-xs font-extrabold text-slate-800 leading-tight">Visual Reports</h4>
               <p className="text-[10px] text-slate-400 font-medium leading-normal">Interactive charts with PDF exports.</p>
             </div>
+            
           </div>
         </div>
 
-        {/* Left Half Footer */}
+        {/* Left Footer */}
         <footer className="mt-8 lg:mt-0 pt-4 border-t border-slate-100 lg:border-none flex items-center justify-between">
           <div className="text-[10px] text-slate-400 font-bold font-mono">
             &copy; {new Date().getFullYear()} {appName}. All rights reserved.
@@ -126,9 +134,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
         </footer>
       </div>
 
-      {/* ─── ANIMATED SEPARATOR LINE (Desktop: Vertical, Mobile: Horizontal) ─── */}
+      {/* ─── ANIMATED SEPARATOR LINE (Positioned at 60% Width) ─── */}
       {/* Vertical separator */}
-      <div className="hidden lg:block absolute top-0 bottom-0 left-1/2 w-[1px] bg-slate-100 z-30">
+      <div className="hidden lg:block absolute top-0 bottom-0 left-[60%] w-[1px] bg-slate-100 z-30">
         <div 
           className="w-[3px] h-32 bg-gradient-to-b from-transparent via-purple-500 to-transparent absolute left-[-1px] animate-flowLine"
           style={{ animation: 'flowLine 3.5s infinite linear' }}
@@ -142,15 +150,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
         ></div>
       </div>
 
-      {/* ─── RIGHT HALF: Dark Mode Visual Graphic (Premium Dark Theme) ─── */}
-      <div className="w-full lg:w-1/2 min-h-screen bg-[#070913] flex items-center justify-center p-6 sm:p-12 relative overflow-hidden z-20">
+      {/* ─── RIGHT COLUMN: Dashboard Preview Graphic (40% Width - Premium Dark Theme) ─── */}
+      <div className="w-full lg:w-[40%] min-h-screen bg-[#070913] flex items-center justify-center p-6 sm:p-12 relative overflow-hidden z-20">
         
-        {/* Soft glowing ambient spots under dashboard mock */}
+        {/* Soft glowing ambient spots */}
         <div className="absolute inset-0 bg-gradient-to-tr from-blue-900/25 to-purple-900/30 rounded-3xl blur-3xl pointer-events-none transform scale-90"></div>
         <div className="absolute top-[20%] left-[20%] w-[60%] h-[60%] rounded-full bg-gradient-to-br from-[#7C3AED]/10 to-indigo-900/20 blur-[120px] pointer-events-none"></div>
 
         {/* Dashboard Wrapper */}
-        <div className="w-full max-w-[480px] lg:max-w-[440px] xl:max-w-[480px] bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xl relative overflow-visible select-none animate-fadeIn">
+        <div className="w-full max-w-[440px] bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xl relative overflow-visible select-none animate-fadeIn">
           
           {/* Mock Dashboard Top controls */}
           <div className="flex justify-between items-center mb-4">
@@ -169,7 +177,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
             </span>
           </div>
 
-          {/* Main Area Chart (Ultra-compact) */}
+          {/* Main Area Chart */}
           <div className="h-[150px] w-full mb-4">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartDataMock} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
