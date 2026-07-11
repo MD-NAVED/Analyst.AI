@@ -2,7 +2,8 @@ import React, { useEffect } from 'react';
 import { useBrandConfig } from '../../config/useBrandConfig';
 
 export const DynamicFavicon: React.FC = () => {
-  const { favicon } = useBrandConfig();
+  const { config } = useBrandConfig();
+  const favicon = config.favicon;
 
   useEffect(() => {
     if (typeof document === 'undefined') return;

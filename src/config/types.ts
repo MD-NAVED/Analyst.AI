@@ -16,15 +16,11 @@ export interface BrandColors {
 
 export interface BrandFeatures {
   chat: boolean;
-  mlLab: boolean;
   dashboard: boolean;
-  sqlEngine: boolean;
   autoAnalyst: boolean;
   pdfExport: boolean;
   excelExport: boolean;
   dataCleaning: boolean;
-  pivotTables: boolean;
-  pipeline: boolean;
 }
 
 export interface BrandUI {

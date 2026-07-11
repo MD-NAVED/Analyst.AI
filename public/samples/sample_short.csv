@@ -1,0 +1,21 @@
+date,category,product,revenue,units_sold,customer_satisfaction
+2026-01-10,Electronics,Wireless Headphones,1299.99,10,4.8
+2026-01-15,Electronics,Bluetooth Speaker,799.50,15,4.5
+2026-01-20,Furniture,Office Chair,2450.00,8,4.2
+2026-02-05,Office Supplies,Notebook Pack,299.70,30,4.7
+2026-02-12,Electronics,Smart Watch,3999.00,10,4.6
+2026-02-18,Furniture,Standing Desk,5990.00,5,4.9
+2026-03-01,Office Supplies,Gel Pens (Set of 12),149.50,50,4.4
+2026-03-10,Electronics,USB-C Hub,599.00,20,4.3
+2026-03-22,Furniture,Ergonomic Footrest,450.00,6,4.0
+2026-04-05,Office Supplies,Whiteboard Markers,180.00,15,4.1
+2026-04-12,Electronics,Mechanical Keyboard,1899.90,10,4.7
+2026-04-20,Furniture,Monitor Stand,1199.60,8,4.5
+2026-05-02,Office Supplies,Desktop Organizer,350.00,10,4.2
+2026-05-15,Electronics,Noise Cancelling Earbuds,2499.50,10,4.8
+2026-05-28,Furniture,Mesh Back Task Chair,1850.00,5,4.3
+2026-06-05,Office Supplies,Paper Shredder,899.90,5,4.4
+2026-06-18,Electronics,Portable Power Bank,749.70,15,4.6
+2026-07-02,Furniture,LED Desk Lamp,649.50,10,4.7
+2026-07-20,Office Supplies,Heavy Duty Stapler,250.00,10,4.1
+2026-08-05,Electronics,Dual Monitor Mount,1599.80,4,4.5

@@ -3,7 +3,7 @@ import {
   Upload, FileSpreadsheet, FileJson, FileText, X, AlertCircle, CheckCircle,
   Search, Filter, BarChart2, PieChart as PieChartIcon, LineChart as LineChartIcon,
   ScatterChart as ScatterChartIcon, Activity, Download, Hash, Type, Calendar, 
-  ChevronRight, ArrowUpRight, ArrowDownRight, Menu, LayoutDashboard, Database,
+  ChevronRight, ChevronLeft, ArrowUpRight, ArrowDownRight, Menu, LayoutDashboard, Database,
   MessageSquare, Sparkles, Wand2, RefreshCcw, Save, Trash2, ArrowRight, FileOutput, Send,
   Terminal, Component, Workflow, Zap, Network, Clock, Settings, Plus, Play, TrendingUp,
   AlertTriangle, Copy, RotateCcw
@@ -17,9 +17,6 @@ import {
 import { saveSession, loadSession, clearSession, getStorageEstimate } from './lib/db';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import alasql from 'alasql';
-import { SimpleLinearRegression } from 'ml-regression-simple-linear';
-import { kmeans } from 'ml-kmeans';
 import GridLayout, { WidthProvider } from 'react-grid-layout/legacy';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -31,6 +28,8 @@ import { FeatureGate } from './components/branding/FeatureGate';
 import { DynamicLogo } from './components/branding/DynamicLogo';
 import { DynamicFavicon } from './components/branding/DynamicFavicon';
 import { BrandLoader } from './components/branding/BrandLoader';
+import { LandingPage } from './components/LandingPage';
+import { OnboardingFlow, OnboardingData } from './components/OnboardingFlow';
 
 
 // --- TYPES ---
@@ -217,7 +216,7 @@ const formatBytes = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-const CHART_COLORS = ['#6366F1', '#22D3EE', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+const CHART_COLORS = ['#3B82F6', '#8B5CF6', '#22C55E', '#F59E0B', '#EC4899', '#14B8A6', '#F97316'];
 
 const callAI = async (payload: { contents?: any, prompt?: string, model?: string }) => {
   const token = localStorage.getItem('datalens_auth_token');
@@ -505,283 +504,371 @@ const calculateSilhouetteScore = (points: number[][], clusters: number[]): numbe
 };
 
 
-interface BrandedAuthPageProps {
-  onLogin: (user: any) => void;
+
+
+const ReactGridLayout = WidthProvider(GridLayout);
+
+interface ChartWidgetProps {
+  title: string;
+  type: 'bar' | 'line' | 'pie' | 'scatter' | 'hist' | 'area';
+  id: string;
+  data: any[];
+  columns: ColumnInfo[];
+  isSampledView: boolean;
+  isExportingPDF: boolean;
+  fileInfo: any;
+  addToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-const BrandedAuthPage: React.FC<BrandedAuthPageProps> = ({ onLogin }) => {
-  const { config, appName, appTagline } = useBrandConfig();
-  const [isRegister, setIsRegister] = useState(false);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportingPDF, fileInfo, addToast }: ChartWidgetProps) => {
+  const numericCols = columns.filter(c => c.type === 'number');
+  const allCols = columns;
+  const [xAxis, setXAxis] = useState(allCols[0]?.name || '');
+  const [yAxis, setYAxis] = useState(numericCols[0]?.name || '');
+  const [chartTitle, setChartTitle] = useState(title);
+  const isMobile = useWindowWidth() < 768;
+  
+  const { sampledData, totalRows, isSampled } = useSampledData(data, isSampledView);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !password.trim() || (isRegister && !name.trim())) {
-      setError('Please fill in all required fields.');
+  const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg' = 'png') => {
+    addToast(`Generating ${format.toUpperCase()}...`, 'info');
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    
+    const element = document.getElementById(id);
+    if (!element) {
+      addToast('Chart element not found', 'error');
+      return;
+    }
+    
+    const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
+    const safeFileName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+    if (format === 'svg') {
+      try {
+        const svgElement = element.querySelector('svg');
+        if (!svgElement) {
+           addToast('SVG not found for this chart', 'error');
+           return;
+        }
+        const clone = svgElement.cloneNode(true) as SVGElement;
+        if (!clone.getAttribute('xmlns')) {
+           clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        }
+        const svgData = new XMLSerializer().serializeToString(clone);
+        const svgBlob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
+        const svgUrl = URL.createObjectURL(svgBlob);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = svgUrl;
+        downloadLink.download = `${filePrefix}_chart_${safeFileName}.svg`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        addToast('Exported SVG successfully', 'success');
+      } catch (e) {
+        console.error(e);
+        addToast('Export failed', 'error');
+      }
       return;
     }
 
-    setLoading(true);
-    setError('');
-
-    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-    const payload = isRegister 
-      ? { email, password, name, brandId: config.client.id }
-      : { email, password, brandId: config.client.id };
-
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        backgroundColor: '#FFFFFF',
+        useCORS: true,
+        logging: false
       });
-      
-      let data: any = {};
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        const text = await response.text();
-        throw new Error(text || `Server returned status ${response.status}`);
-      }
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Authentication failed.');
-      }
-
-      localStorage.setItem('datalens_auth_token', data.token);
-      onLogin(data.user);
-    } catch (e: any) {
-      setError(e.message || 'Server connection error.');
-    } finally {
-      setLoading(false);
+      const imgData = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.download = `${filePrefix}_chart_${safeFileName}.png`;
+      a.href = imgData;
+      a.click();
+      addToast('Exported PNG successfully', 'success');
+    } catch (e) {
+      console.error(e);
+      addToast('Export failed', 'error');
     }
   };
 
-  const handleSocialLogin = async (provider: string) => {
-    if (provider === 'Google') {
-      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-      if (clientId && clientId.trim() !== '' && !clientId.includes('your_google_client_id')) {
-        const redirectUri = window.location.origin + window.location.pathname;
-        const scope = 'email profile';
-        const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}`;
-        window.location.href = googleAuthUrl;
-        return;
-      } else {
-        setError('Google Client ID is not configured in .env. Please set VITE_GOOGLE_CLIENT_ID to use real Google login.');
-        return;
-      }
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/auth/social-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, brandId: config.client.id })
+  const chartData = useMemo<any[]>(() => {
+    if (type === 'hist') {
+      const values = sampledData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
+      if (!values.length) return [];
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const binCount = 10;
+      const binSize = (max - min) / binCount || 1;
+      const bins = Array.from({length: binCount}, (_, i) => ({
+        name: `${(min + i * binSize).toFixed(1)} - ${(min + (i + 1) * binSize).toFixed(1)}`,
+        count: 0
+      }));
+      values.forEach(v => {
+        let idx = Math.floor((v - min) / binSize);
+        if (idx >= binCount) idx = binCount - 1;
+        if (idx >= 0) bins[idx].count++;
       });
-      
-      let data: any = {};
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        const text = await response.text();
-        throw new Error(text || `Server returned status ${response.status}`);
-      }
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Authentication failed.');
-      }
-
-      localStorage.setItem('datalens_auth_token', data.token);
-      onLogin(data.user);
-    } catch (e: any) {
-      setError(e.message || 'Server connection error.');
-    } finally {
-      setLoading(false);
+      return bins;
     }
+    
+    if (type === 'pie') {
+      const counts: {[key: string]: number} = {};
+      sampledData.forEach(d => {
+        const val = String(d[xAxis] ?? 'Null');
+        counts[val] = (counts[val] || 0) + 1;
+      });
+      return Object.entries(counts)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a,b) => b.value - a.value)
+        .slice(0, 10);
+    }
+    
+    if (type === 'scatter') {
+      return sampledData.map(d => ({
+        [xAxis]: Number(d[xAxis]),
+        [yAxis]: Number(d[yAxis])
+      })).filter(d => !isNaN(d[xAxis]) && !isNaN(d[yAxis]));
+    }
+    
+    // Line / Bar / Area - Group by X and average Y
+    const groups: {[key: string]: {sum: number, count: number}} = {};
+    sampledData.forEach(d => {
+      const xVal = String(d[xAxis] ?? 'Null');
+      const yVal = Number(d[yAxis]);
+      if (!isNaN(yVal)) {
+        if (!groups[xVal]) groups[xVal] = { sum: 0, count: 0 };
+        groups[xVal].sum += yVal;
+        groups[xVal].count++;
+      }
+    });
+    
+    return Object.entries(groups)
+      .map(([name, info]) => ({
+        name,
+        [yAxis]: Number((info.sum / info.count).toFixed(2))
+      }))
+      .slice(0, 50);
+  }, [sampledData, type, xAxis, yAxis]);
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white border border-[var(--border)] p-3 rounded-lg shadow-lg font-sans text-xs">
+          <p className="font-semibold text-[var(--text-primary)] mb-1">{payload[0].payload.name || payload[0].payload[xAxis]}</p>
+          {payload.map((p: any, i: number) => (
+            <p key={i} className="text-[var(--primary)] font-medium">
+              {p.name || yAxis || 'value'}: {p.value.toLocaleString()}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4 bg-[var(--bg)] font-sans">
-      <div className="absolute inset-0 pointer-events-none opacity-20" style={{ background: 'radial-gradient(circle at top right, var(--primary), transparent 45%), radial-gradient(circle at bottom left, var(--accent), transparent 45%)' }}></div>
-      
-      <div className="w-full max-w-md bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-8 shadow-2xl relative overflow-hidden transition-all duration-300">
-        <div className="flex flex-col items-center text-center mb-8">
-          <div className="mb-4">
-            <DynamicLogo />
-          </div>
-          <p className="text-sm text-slate-400 font-medium">{appTagline}</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <h2 className="text-xl font-bold text-white mb-2 text-center">
-            {isRegister ? 'Create Account' : 'Welcome Back'}
-          </h2>
-
-          {error && (
-            <div className="p-3 bg-[rgba(239,68,68,0.1)] border border-[var(--danger)] text-[var(--danger)] rounded-lg text-xs font-semibold flex items-center gap-2">
-              <AlertCircle size={14} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {isRegister && (
-            <div>
-              <label htmlFor="name" className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Name</label>
-              <input
-                type="text"
-                id="name"
-                name="name"
-                autoComplete="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="John Doe"
-                className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
-                required
+    <div className="premium-card chart-container flex flex-col h-[400px]">
+      <div className="flex justify-between items-center mb-4 no-print flex-wrap gap-2">
+        <input 
+          type="text" 
+          value={chartTitle} 
+          onChange={e => setChartTitle(e.target.value)} 
+          className="bg-transparent border-none outline-none font-bold text-[var(--text-primary)] text-sm hover:bg-[var(--surface-raised)] px-2 py-1 rounded transition-colors focus:bg-[var(--surface-raised)]"
+        />
+        
+        <div className="flex items-center gap-2 flex-wrap">
+          {type !== 'hist' && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted font-semibold">X-Axis</span>
+              <CustomSelect 
+                size="sm" 
+                value={xAxis} 
+                onChange={setXAxis} 
+                options={allCols.map(c => ({ value: c.name, label: c.name }))} 
               />
             </div>
           )}
-
-          <div>
-            <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Email Address</label>
-            <input
-              type="email"
-              id="email"
-              name="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@company.com"
-              className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="password" className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Password</label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              autoComplete={isRegister ? "new-password" : "current-password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
-              required
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn-primary w-full justify-center p-3 text-sm font-semibold rounded-lg mt-4 cursor-pointer"
-          >
-            {loading ? (
-              <RefreshCcw className="animate-spin" size={16} />
-            ) : isRegister ? (
-              'Sign Up'
-            ) : (
-              'Sign In'
-            )}
-          </button>
-        </form>
-
-        {!isRegister && (
-          <>
-            <div className="relative flex py-5 items-center">
-              <div className="flex-grow border-t border-[var(--border)]"></div>
-              <span className="flex-shrink mx-4 text-xs text-slate-400">Or continue with</span>
-              <div className="flex-grow border-t border-[var(--border)]"></div>
+          
+          {type !== 'pie' && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted font-semibold">Y-Axis</span>
+              <CustomSelect 
+                size="sm" 
+                value={yAxis} 
+                onChange={setYAxis} 
+                options={numericCols.map(c => ({ value: c.name, label: c.name }))} 
+              />
             </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <button 
-                type="button" 
-                disabled={loading}
-                onClick={() => handleSocialLogin('Google')}
-                className="flex flex-col items-center justify-center p-3 border border-[var(--border)] rounded-xl bg-[var(--surfaceHover)] hover:bg-[var(--border)] transition-all duration-200 cursor-pointer text-xs text-white gap-2 font-medium disabled:opacity-50"
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path fill="#EA4335" d="M12 5.04c1.62 0 3.08.56 4.22 1.65l3.15-3.15C17.45 1.76 14.96 1 12 1 7.35 1 3.39 3.67 1.45 7.57l3.8 2.95c.9-2.7 3.4-4.48 6.75-4.48z"/>
-                  <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.51h6.44c-.28 1.48-1.12 2.73-2.38 3.58l3.7 2.87c2.16-1.99 3.73-4.92 3.73-8.61z"/>
-                  <path fill="#FBBC05" d="M5.25 14.52c-.23-.69-.36-1.42-.36-2.18s.13-1.49.36-2.18L1.45 7.21C.65 8.81.18 10.6.18 12.5s.47 3.69 1.27 5.29l3.8-2.97z"/>
-                  <path fill="#34A853" d="M12 23c3.24 0 5.97-1.08 7.96-2.91l-3.7-2.87c-1.03.69-2.35 1.1-4.26 1.1-3.35 0-6.19-2.28-7.2-5.48l-3.8 2.95C3.15 19.8 7.14 23 12 23z"/>
-                </svg>
-                <span>Google</span>
-              </button>
-              <button 
-                type="button" 
-                disabled={loading}
-                onClick={() => handleSocialLogin('GitHub')}
-                className="flex flex-col items-center justify-center p-3 border border-[var(--border)] rounded-xl bg-[var(--surfaceHover)] hover:bg-[var(--border)] transition-all duration-200 cursor-pointer text-xs text-white gap-2 font-medium disabled:opacity-50"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.167 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.137 20.164 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
-                </svg>
-                <span>GitHub</span>
-              </button>
-              <button 
-                type="button" 
-                disabled={loading}
-                onClick={() => handleSocialLogin('Microsoft')}
-                className="flex flex-col items-center justify-center p-3 border border-[var(--border)] rounded-xl bg-[var(--surfaceHover)] hover:bg-[var(--border)] transition-all duration-200 cursor-pointer text-xs text-white gap-2 font-medium disabled:opacity-50"
-              >
-                <svg className="w-5 h-5" viewBox="0 0 23 23">
-                  <path fill="#F25022" d="M0 0h11v11H0z"/>
-                  <path fill="#7FBA00" d="M12 0h11v11H12z"/>
-                  <path fill="#00A4EF" d="M0 12h11v11H0z"/>
-                  <path fill="#FFB900" d="M12 12h11v11H12z"/>
-                </svg>
-                <span>Microsoft</span>
-              </button>
-            </div>
-          </>
-        )}
-
-        <div className="mt-6 text-center text-xs text-muted">
-          {isRegister ? (
-            <>
-              Already have an account?{' '}
-              <button 
-                onClick={() => { setIsRegister(false); setError(''); }}
-                className="text-[var(--primary)] hover:underline font-semibold bg-transparent border-none cursor-pointer"
-              >
-                Sign In
-              </button>
-            </>
-          ) : (
-            <>
-              Don't have an account yet?{' '}
-              <button 
-                onClick={() => { setIsRegister(true); setError(''); }}
-                className="text-[var(--primary)] hover:underline font-semibold bg-transparent border-none cursor-pointer"
-              >
-                Sign Up
-              </button>
-            </>
           )}
+          
+          <div className="h-4 w-px bg-[var(--border)] mx-1"></div>
+          <button className="btn-icon" title="Download SVG" onClick={() => downloadChart(id, chartTitle, 'svg')}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+          </button>
+          <button className="btn-icon" title="Download PNG" onClick={() => downloadChart(id, chartTitle, 'png')}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+          </button>
         </div>
+      </div>
+      
+      <div className="flex-1 min-h-0 relative">
+        {isSampled && (
+          <div className="absolute top-0 right-0 z-10 bg-amber-50 text-[10px] text-amber-600 border border-amber-200 px-2 py-0.5 rounded font-mono">
+            Sampled View ({totalRows.toLocaleString()} rows)
+          </div>
+        )}
+        <ResponsiveContainer width="100%" height="100%">
+          {type === 'hist' ? (
+            <BarChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <defs>
+                <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
+                  <stop offset="100%" stopColor="#8B5CF6" stopOpacity={1}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis dataKey="name" tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
+              <Bar dataKey="count" fill="url(#barGradient)" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </BarChart>
+          ) : type === 'area' ? (
+            <AreaChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <defs>
+                <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} />
+              <Area type="monotone" dataKey={yAxis} stroke="#3B82F6" fillOpacity={1} fill="url(#colorGradient)" strokeWidth={3} activeDot={{r: 6, strokeWidth: 0, fill: '#3B82F6'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </AreaChart>
+          ) : type === 'line' ? (
+            <LineChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} />
+              <Line type="monotone" dataKey={yAxis} stroke="#3B82F6" strokeWidth={3} dot={false} activeDot={{r: 6, strokeWidth: 0, fill: '#3B82F6'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </LineChart>
+          ) : type === 'pie' ? (
+            <PieChart margin={{top: 10, right: 10, left: 10, bottom: 10}}>
+              <Pie data={chartData} cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={5} dataKey="value" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out">
+                {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
+              </Pie>
+              <RechartsTooltip content={<CustomTooltip />} />
+              {!isMobile && <Legend verticalAlign="top" align="right" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', color: 'var(--text-secondary)'}} />}
+            </PieChart>
+          ) : type === 'scatter' ? (
+            <ScatterChart margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis type="number" dataKey={xAxis} name={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} />
+              <YAxis type="number" dataKey={yAxis} name={yAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} />
+              <ZAxis dataKey={chartData[0] && chartData[0].count !== undefined ? 'count' : ''} range={[20, 200]} />
+              <RechartsTooltip content={<CustomTooltip />} />
+              <Scatter data={chartData} fill="#3B82F6" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </ScatterChart>
+          ) : (
+            <BarChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <defs>
+                <linearGradient id="barGradient2" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
+                  <stop offset="100%" stopColor="#8B5CF6" stopOpacity={1}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis dataKey="name" tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
+              <Bar dataKey="count" fill="url(#barGradient2)" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </BarChart>
+          )}
+        </ResponsiveContainer>
       </div>
     </div>
   );
 };
 
-const ReactGridLayout = WidthProvider(GridLayout);
+interface CustomSelectProps {
+  value: string;
+  onChange: (val: string) => void;
+  options: { value: string; label: string }[];
+  className?: string;
+  size?: 'sm' | 'md';
+  disabled?: boolean;
+}
+
+const CustomSelect: React.FC<CustomSelectProps> = ({ value, onChange, options, className = '', size = 'md', disabled = false }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find(opt => opt.value === value) || options[0];
+  const isSm = size === 'sm';
+
+  return (
+    <div className={`relative inline-block ${isSm ? 'min-w-[120px]' : 'w-full'} ${className}`} ref={containerRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full flex items-center justify-between border rounded-xl text-left font-semibold hover:bg-[var(--surface-hover)] focus:ring-2 focus:ring-[var(--primary)]/10 transition-all select-none ${
+          disabled 
+            ? 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed opacity-60' 
+            : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text-primary)] cursor-pointer focus:border-[var(--primary)] shadow-sm'
+        } ${
+          isSm ? 'px-3 py-1.5 text-[11px] min-h-[32px]' : 'px-3.5 py-2.5 text-xs min-h-[40px]'
+        }`}
+      >
+        <span className="truncate pr-1">{selectedOption ? selectedOption.label : ''}</span>
+        <ChevronRight size={isSm ? 12 : 14} className={`transform transition-transform text-[var(--text-muted)] shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute left-0 right-0 mt-1.5 bg-white border border-[#E5E7EB] rounded-xl shadow-xl z-50 overflow-hidden py-1 animate-fadeIn select-none min-w-[140px]">
+          {options.map((opt) => (
+            <div
+              key={opt.value}
+              onClick={() => {
+                onChange(opt.value);
+                setIsOpen(false);
+              }}
+              className={`text-left cursor-pointer transition-colors ${
+                isSm ? 'px-3 py-1.5 text-[11px]' : 'px-3.5 py-2.5 text-xs'
+              } ${
+                opt.value === value
+                  ? 'bg-blue-50 text-blue-600 font-bold'
+                  : 'text-[#334155] hover:bg-[#F8FAFC]'
+              }`}
+            >
+              {opt.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 function MainApp() {
   const { config, appName, appTagline, hasFeature } = useBrandConfig();
+  const isMobile = useWindowWidth() < 768;
   
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [showAuthModal, setShowAuthModal] = useState<'login' | 'register' | null>(null);
+  const [onboardingData, setOnboardingData] = useState<OnboardingData | null>(null);
   
   useEffect(() => {
     const checkUser = async () => {
@@ -853,7 +940,66 @@ function MainApp() {
     handleGoogleHash();
   }, [config]);
 
-  const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'pivot' | 'eda' | 'chat' | 'sql' | 'ml' | 'dashboard' | 'pipeline' | 'auto-analyst'>('upload');
+  // ─── Standalone auth handlers for OnboardingFlow ─────────────────────────
+  const handleAuthSubmit = async (
+    email: string,
+    password: string,
+    name: string,
+    isRegister: boolean
+  ): Promise<any> => {
+    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+    const payload = isRegister
+      ? { email, password, name, brandId: config?.client?.id }
+      : { email, password, brandId: config?.client?.id };
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const contentType = response.headers.get('content-type');
+    let data: any = {};
+    if (contentType && contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      throw new Error(text || `Server returned status ${response.status}`);
+    }
+    if (!response.ok) throw new Error(data.error || 'Authentication failed.');
+    localStorage.setItem('datalens_auth_token', data.token);
+    return data.user;
+  };
+
+  const handleSocialAuthSubmit = async (provider: string): Promise<any> => {
+    if (provider === 'Google') {
+      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+      if (clientId && clientId.trim() !== '' && !clientId.includes('your_google_client_id')) {
+        const redirectUri = window.location.origin + window.location.pathname;
+        const scope = 'email profile';
+        const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+        window.location.href = googleAuthUrl;
+        return {};
+      } else {
+        throw new Error('Google Client ID is not configured. Please set VITE_GOOGLE_CLIENT_ID.');
+      }
+    }
+    const response = await fetch('/api/auth/social-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, brandId: config?.client?.id }),
+    });
+    const contentType = response.headers.get('content-type');
+    let data: any = {};
+    if (contentType && contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      throw new Error(`Server returned status ${response.status}`);
+    }
+    if (!response.ok) throw new Error(data.error || 'Authentication failed.');
+    localStorage.setItem('datalens_auth_token', data.token);
+    return data.user;
+  };
+
+  const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'eda' | 'chat' | 'dashboard' | 'auto-analyst'>('upload');
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
   const [data, setData] = useState<any[]>([]);
   const [initialData, setInitialData] = useState<any[]>([]);
@@ -898,6 +1044,12 @@ function MainApp() {
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+
+  const selectTab = (tab: 'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'eda' | 'chat' | 'dashboard' | 'auto-analyst') => {
+    setActiveTab(tab);
+    setSidebarOpen(false);
+  };
   
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: '1', role: 'model', content: 'Hi! I am your AI Data Assistant. Ask me anything about your dataset.' }
@@ -938,35 +1090,33 @@ function MainApp() {
   const [autoPilotCharts, setAutoPilotCharts] = useState<any[]>([]);
   const [autoPilotReport, setAutoPilotReport] = useState<any>(null);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
-  
-  // ETL Pipeline State
-  const [pipelineSteps, setPipelineSteps] = useState<any[]>([
-    { id: 'step-0', type: 'source', name: 'Source Dataset', config: {} },
-    { id: 'step-1', type: 'clean', name: 'Clean & Filter', config: {} }
-  ]);
-  const [isPipelineRunning, setIsPipelineRunning] = useState(false);
-  const [pipelineResult, setPipelineResult] = useState<any[] | null>(null);
-  const [pipelineColumns, setPipelineColumns] = useState<any[]>([]);
+  // Lifted Section states for rendering as pure helper functions (stable refs, zero blink)
+  const [uploadIsDragging, setUploadIsDragging] = useState(false);
+  const [previewSearch, setPreviewSearch] = useState('');
+  const [statsSelectedCol, setStatsSelectedCol] = useState('');
+  const [cleaningSelectedCol, setCleaningSelectedCol] = useState('');
+  const [chartsIsSampledView, setChartsIsSampledView] = useState(true);
+  const [edaInsights, setEdaInsights] = useState<string[]>([]);
+  const [edaLoadingInsights, setEdaLoadingInsights] = useState(false);
 
-  // Load saved ETL pipeline when file changes
+  // Lifted scroll ref effect for ChatSection
   useEffect(() => {
-    if (fileInfo?.name) {
-      try {
-        const saved = localStorage.getItem(`datalens_pipeline_${fileInfo.name}`);
-        if (saved) {
-          setPipelineSteps(JSON.parse(saved));
-        } else {
-          setPipelineSteps([
-            { id: 'step-0', type: 'source', name: 'Source Dataset', config: {} },
-            { id: 'step-1', type: 'clean', name: 'Clean & Filter', config: {} }
-          ]);
-        }
-      } catch (e) {
-        console.error("Failed to load saved pipeline", e);
-      }
-      setPipelineResult(null);
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [fileInfo?.name]);
+  }, [chatMessages, chatTyping]);
+
+  useEffect(() => {
+    if (columns.length > 0) {
+      const numericCols = columns.filter(c => c.type === 'number');
+      if (!statsSelectedCol && numericCols.length > 0) {
+        setStatsSelectedCol(numericCols[0]?.name || '');
+      }
+      if (!cleaningSelectedCol) {
+        setCleaningSelectedCol(columns[0]?.name || '');
+      }
+    }
+  }, [columns, statsSelectedCol, cleaningSelectedCol]);
 
   const triggerSaveSession = useCallback(async () => {
     if ((showRestoreSession && !hasRestored) || (!data.length && !initialData.length)) return;
@@ -1738,12 +1888,12 @@ STRICT RULES:
                             <ScatterChart margin={{top:10, right:20, left:0, bottom:20}}>
                               <defs>
                                 <linearGradient id={`autoScatterGrad${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="0%" stopColor="#22D3EE" stopOpacity={0.9}/>
-                                  <stop offset="100%" stopColor="#6366F1" stopOpacity={0.9}/>
+                                  <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.9}/>
+                                  <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0.9}/>
                                 </linearGradient>
                               </defs>
-                              <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" />
-                              <XAxis type="number" dataKey="x" name={cfg.xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke:'#1E2D3D'}} tickLine={false} label={{value: cfg.xAxis, position:'insideBottom', offset:-10, fill:'var(--text-muted)', fontSize:11}} />
+                              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" />
+                              <XAxis type="number" dataKey="x" name={cfg.xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke:'#E2E8F0'}} tickLine={false} label={{value: cfg.xAxis, position:'insideBottom', offset:-10, fill:'var(--text-muted)', fontSize:11}} />
                               <YAxis type="number" dataKey="y" name={cfg.yAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
                               <RechartsTooltip content={<CustomTooltip />} cursor={{strokeDasharray:'3 3'}} />
                               <Scatter data={scatterData} fill={`url(#autoScatterGrad${idx})`} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} />
@@ -1762,16 +1912,16 @@ STRICT RULES:
                               <BarChart data={aggregatedData} layout="horizontal" margin={{top:10, right:10, left:0, bottom: aggregatedData.length > 8 ? 40 : 20}}>
                                  <defs>
                                    <linearGradient id={`autoBarGrad${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                     <stop offset="0%" stopColor="#22D3EE" stopOpacity={1}/>
-                                     <stop offset="100%" stopColor="#6366F1" stopOpacity={1}/>
+                                     <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
+                                     <stop offset="100%" stopColor="#8B5CF6" stopOpacity={1}/>
                                    </linearGradient>
                                  </defs>
-                                 <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
+                                 <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
                                  <XAxis
                                    dataKey={cfg.xAxis}
                                    type="category"
                                    tick={{fill: 'var(--text-muted)', fontSize: aggregatedData.length > 8 ? 9 : 11}}
-                                   axisLine={{stroke: '#1E2D3D'}}
+                                   axisLine={{stroke: '#E2E8F0'}}
                                    tickLine={false}
                                    interval={tickInterval}
                                    angle={aggregatedData.length > 8 ? -30 : 0}
@@ -1974,16 +2124,14 @@ STRICT RULES:
   };
 
   const UploadSection = () => {
-    const [isDragging, setIsDragging] = useState(false);
-    
     const handleDragOver = (e: React.DragEvent) => {
       e.preventDefault();
-      setIsDragging(true);
+      setUploadIsDragging(true);
     };
-    const handleDragLeave = () => setIsDragging(false);
+    const handleDragLeave = () => setUploadIsDragging(false);
     const handleDrop = (e: React.DragEvent) => {
       e.preventDefault();
-      setIsDragging(false);
+      setUploadIsDragging(false);
       if (e.dataTransfer.files && e.dataTransfer.files[0]) {
         processFile(e.dataTransfer.files[0]);
       }
@@ -1994,131 +2142,205 @@ STRICT RULES:
       }
     };
 
+    // Time-based greeting helper
+    const getGreeting = () => {
+      const h = new Date().getHours();
+      if (h < 12) return 'Good Morning';
+      if (h < 17) return 'Good Afternoon';
+      return 'Good Evening';
+    };
+    const displayName = onboardingData?.firstName
+      ? `${onboardingData.firstName}${onboardingData.lastName ? ' ' + onboardingData.lastName : ''}`
+      : currentUser?.name || '';
+
     return (
-      <div className="fade-in-up stagger-1 h-full flex flex-col justify-center max-w-6xl mx-auto w-full px-4 py-8">
-        <div className="text-center mb-8">
+      <div className="fade-in-up stagger-1 h-full flex flex-col max-w-6xl mx-auto w-full px-4 py-8">
+        {/* ── Personalized Greeting (Mixpanel style) ── */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+            {getGreeting()}{displayName ? `, ${displayName}` : ''} 👋
+          </h1>
+          {onboardingData?.workspaceName && (
+            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+              {onboardingData.workspaceName}
+            </p>
+          )}
+        </div>
+
+        {/* ── Setup Banner (Mixpanel "Continue Setup" style) ── */}
+        {!fileInfo && (
+          <div
+            className="flex items-center gap-4 rounded-2xl px-5 py-4 mb-6 border"
+            style={{
+              background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
+              borderColor: '#C4B5FD',
+            }}
+          >
+            <div className="flex-shrink-0 w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
+              <span style={{ fontSize: 20 }}>📊</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm" style={{ color: '#1E1B4B' }}>Unlock the power of your data</p>
+              <p className="text-xs mt-0.5" style={{ color: '#6D28D9' }}>Upload your first dataset to get started with AI-powered analysis</p>
+            </div>
+            <label
+              className="flex-shrink-0 px-4 py-2 rounded-full text-white text-sm font-semibold cursor-pointer transition-all duration-200 hover:opacity-90"
+              style={{ background: '#7C3AED' }}
+            >
+              <input type="file" className="hidden" accept=".csv,.xlsx,.xls,.json" onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0]); }} />
+              Upload Dataset
+            </label>
+          </div>
+        )}
+
+        {/* ── Already has a file — show "Your Recent" banner ── */}
+        {fileInfo && (
+          <div
+            className="flex items-center gap-4 rounded-2xl px-5 py-4 mb-6 border"
+            style={{ background: '#F0FDF4', borderColor: '#86EFAC' }}
+          >
+            <div className="flex-shrink-0 w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
+              <span style={{ fontSize: 20 }}>✅</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm" style={{ color: '#14532D' }}>
+                Active dataset: <span className="font-mono">{fileInfo.name}</span>
+              </p>
+              <p className="text-xs mt-0.5 text-green-600">{fileInfo.rows?.toLocaleString() ?? data.length} rows · {fileInfo.columns ?? columns.length} columns</p>
+            </div>
+          </div>
+        )}
+
+        {/* Original section heading */}
+        <div className="text-center mb-6 hidden">
           <h1 className="mb-2 text-3xl font-bold tracking-tight">Data Operations Control Center</h1>
-          <p className="text-slate-400 text-sm">Upload datasets, configure ingestion rules, or load demo environments.</p>
+          <p className="text-[var(--text-muted)] text-sm">Upload datasets, configure ingestion rules, or load demo environments.</p>
         </div>
         
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Left Column - Ingestion Controls (7 cols) */}
-          <div className="lg:col-span-7 flex flex-col gap-6">
-            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
-              <h3 className="text-base font-semibold mb-4 text-emerald-400 flex items-center gap-2">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+          {/* Card 1: Ingestion Controls (7 cols) */}
+          <div className="lg:col-span-7 card p-6 flex flex-col justify-between">
+            <div>
+              <h3 className="text-base font-semibold mb-4 text-[var(--primary)] flex items-center gap-2">
                 <Upload size={16} /> File Ingestion Dropzone
               </h3>
               <label 
-                className={`drop-zone ${isDragging ? 'active' : ''} border-2 border-dashed border-slate-700 hover:border-emerald-500/50 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 bg-slate-950/20`}
+                className={`drop-zone ${uploadIsDragging ? 'active' : ''}`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
               >
                 <input type="file" className="hidden" accept=".csv,.xlsx,.xls,.json" onChange={handleFileChange} />
-                <div className="upload-icon-container mb-4 w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700/60 text-slate-400 transition-colors">
-                  <Upload size={20} />
+                <div className="upload-icon-container">
+                  <Upload size={24} />
                 </div>
-                <h4 className="text-sm font-semibold mb-1 text-slate-200">Click or drag file to this area</h4>
-                <p className="text-xs text-slate-400 text-center mb-4">Max file size 100MB. Supports CSV, XLSX, JSON format.</p>
+                <h4 className="text-sm font-semibold mb-1">Click or drag file to this area</h4>
+                <p className="text-xs text-[var(--text-muted)] text-center mb-4">Max file size 100MB. Supports CSV, XLSX, JSON format.</p>
                 
                 <div className="flex gap-3">
-                  <span className="bg-slate-950/50 text-slate-400 border-slate-800/80 font-mono text-[10px] font-semibold px-2 py-0.5 rounded border">CSV</span>
-                  <span className="bg-slate-950/50 text-slate-400 border-slate-800/80 font-mono text-[10px] font-semibold px-2 py-0.5 rounded border">XLSX</span>
-                  <span className="bg-slate-950/50 text-slate-400 border-slate-800/80 font-mono text-[10px] font-semibold px-2 py-0.5 rounded border">JSON</span>
+                  <span className="bg-blue-50 text-blue-600 border-blue-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">CSV</span>
+                  <span className="bg-purple-50 text-purple-600 border-purple-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">XLSX</span>
+                  <span className="bg-emerald-50 text-emerald-600 border-emerald-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">JSON</span>
                 </div>
               </label>
             </div>
+          </div>
 
-            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
-              <h3 className="text-base font-semibold mb-4 text-emerald-400 flex items-center gap-2">
-                <Settings size={16} /> Advanced Parser Settings
+          {/* Card 2: System Status (5 cols) */}
+          <div className="lg:col-span-5 card p-6 flex flex-col justify-between">
+            <div>
+              <h3 className="text-base font-semibold mb-4 text-[var(--text-primary)] flex items-center gap-2">
+                <Zap size={16} className="text-[var(--primary)]" /> System Status
+              </h3>
+              <div className="flex flex-col gap-0 font-mono text-xs">
+                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
+                  <span className="text-[var(--text-muted)]">Core Engine</span>
+                  <span className="text-[var(--success)] flex items-center gap-1.5 font-bold"><span className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse"></span> ONLINE</span>
+                </div>
+                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
+                  <span className="text-[var(--text-muted)]">AI Proxy</span>
+                  <span className="text-[var(--success)] font-bold">CONNECTED</span>
+                </div>
+                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
+                  <span className="text-[var(--text-muted)]">Memory Allocation</span>
+                  <span className="text-[var(--text-primary)] font-semibold">OPTIMIZED</span>
+                </div>
+                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
+                  <span className="text-[var(--text-muted)]">CORS Policy</span>
+                  <span className="text-[var(--text-primary)] font-semibold">DYNAMIC</span>
+                </div>
+                <div className="flex justify-between items-center py-2.5">
+                  <span className="text-[var(--text-muted)]">Security Ingestion</span>
+                  <span className="text-[var(--success)] font-bold">ACTIVE</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Advanced Parser Settings (7 cols) */}
+          <div className="lg:col-span-7 card p-6 flex flex-col justify-between">
+            <div>
+              <h3 className="text-base font-semibold mb-4 text-[var(--text-primary)] flex items-center gap-2">
+                <Settings size={16} className="text-[var(--primary)]" /> Advanced Parser Settings
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">CSV Delimiter</label>
-                  <select 
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">CSV Delimiter</label>
+                  <CustomSelect 
                     value={csvDelimiter} 
-                    onChange={(e) => setCsvDelimiter(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 outline-none focus:border-emerald-500/50 transition-colors cursor-pointer"
-                  >
-                    <option value="auto">Auto-detect Delimiter</option>
-                    <option value=",">Comma ( , )</option>
-                    <option value=";">Semicolon ( ; )</option>
-                    <option value="&#9;">Tab ( \t )</option>
-                  </select>
+                    onChange={setCsvDelimiter} 
+                    options={[
+                      { value: 'auto', label: 'Auto-detect Delimiter' },
+                      { value: ',', label: 'Comma ( , )' },
+                      { value: ';', label: 'Semicolon ( ; )' },
+                      { value: '\t', label: 'Tab ( \\t )' }
+                    ]}
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Parser Constraints</label>
-                  <label className="flex items-center gap-2.5 cursor-pointer bg-slate-950 border border-slate-800/60 p-2.5 rounded-lg hover:border-emerald-500/30 transition-colors w-full">
+                  <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Parser Constraints</label>
+                  <label className="flex items-center gap-2.5 cursor-pointer bg-[var(--surface-raised)] border border-[var(--border)] p-2.5 rounded-lg hover:border-[var(--primary)] transition-colors w-full">
                     <input 
                       type="checkbox" 
                       checked={strictMode}
                       onChange={(e) => setStrictMode(e.target.checked)}
-                      className="accent-emerald-500 w-4 h-4 cursor-pointer align-middle rounded"
+                      className="accent-blue-600 w-4 h-4 cursor-pointer align-middle rounded"
                     />
-                    <span className="text-xs text-slate-300 font-medium leading-none">Strict Mode (skip null rows)</span>
+                    <span className="text-xs text-[var(--text-primary)] font-medium leading-none">Strict Mode (skip null rows)</span>
                   </label>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Right Column - Status & Templates (5 cols) */}
-          <div className="lg:col-span-5 flex flex-col gap-6">
-            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
-              <h3 className="text-base font-semibold mb-4 text-emerald-400 flex items-center gap-2">
-                <Zap size={16} /> Operations Overview
+          {/* Card 4: Load Demo Environment (5 cols) */}
+          <div className="lg:col-span-5 card p-6 flex flex-col justify-between">
+            <div>
+              <h3 className="text-base font-semibold mb-3 text-[var(--text-primary)] flex items-center gap-2">
+                <Sparkles size={16} className="text-[var(--primary)]" /> Load Demo Environment
               </h3>
-              <div className="flex flex-col gap-3 font-mono text-xs">
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400">Core Engine</span>
-                  <span className="text-emerald-400 flex items-center gap-1.5 font-bold"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> ONLINE</span>
-                </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400">AI Proxy</span>
-                  <span className="text-emerald-400 font-bold">CONNECTED</span>
-                </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400">Memory Allocation</span>
-                  <span className="text-slate-200">OPTIMIZED</span>
-                </div>
-                <div className="flex justify-between items-center py-1.5 border-b border-slate-800/60">
-                  <span className="text-slate-400">CORS Policy</span>
-                  <span className="text-slate-200">DYNAMIC</span>
-                </div>
-                <div className="flex justify-between items-center py-1.5">
-                  <span className="text-slate-400">Security Ingestion</span>
-                  <span className="text-emerald-400 font-bold">ACTIVE</span>
-                </div>
-              </div>
+              <p className="text-xs text-[var(--text-secondary)] mb-4 leading-relaxed">Don't have a dataset ready? Load our pre-configured sales sandbox instantly to explore charts and insights.</p>
             </div>
-
-            <div className="card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm">
-              <h3 className="text-base font-semibold mb-3 text-emerald-400 flex items-center gap-2">
-                <Sparkles size={16} /> Load Demo Environment
-              </h3>
-              <p className="text-xs text-slate-400 mb-4 leading-relaxed">Don't have a dataset ready? Load our pre-configured sales sandbox instantly to explore charts and insights.</p>
-              <button 
-                onClick={loadSampleSalesDataset}
-                className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold py-2.5 px-4 rounded-lg transition-colors cursor-pointer text-xs"
-              >
-                <Sparkles size={14} /> Ingest Sample Sales Data
-              </button>
-            </div>
+            <button 
+              onClick={loadSampleSalesDataset}
+              className="btn-primary w-full justify-center py-2.5 px-4 text-xs cursor-pointer"
+            >
+              <Sparkles size={14} /> Ingest Sample Sales Data
+            </button>
           </div>
         </div>
 
         {/* Loading Progress Section */}
         {loading && (
-          <div className="mt-8 card p-6 border border-slate-700/60 bg-slate-900/40 backdrop-blur-sm max-w-6xl w-full">
+          <div className="mt-8 card p-6 max-w-6xl w-full">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-semibold text-slate-200">{parseProgress.stage || 'Ingesting Data...'}</span>
-              <span className="mono-text text-sm text-emerald-400 font-bold">{parseProgress.percent}%</span>
+              <span className="text-sm font-semibold text-[var(--text-primary)]">{parseProgress.stage || 'Ingesting Data...'}</span>
+              <span className="mono-text text-sm text-[var(--primary)] font-bold">{parseProgress.percent}%</span>
             </div>
-            <div className="progress-container mb-3 h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-              <div className="progress-fill transition-all duration-200 h-full bg-emerald-500" style={{width: `${parseProgress.percent}%`}}></div>
+            <div className="progress-container mb-3">
+              <div className="progress-fill" style={{width: `${parseProgress.percent}%`}}></div>
             </div>
-            <div className="flex justify-between items-center text-xs text-[#94A3B8] font-mono">
+            <div className="flex justify-between items-center text-xs text-[var(--text-muted)] font-mono">
               <div className="flex gap-4">
                 <span>Rows: {parseProgress.rows.toLocaleString()}</span>
                 <span>Elapsed: {parseProgress.elapsed}s</span>
@@ -2129,7 +2351,7 @@ STRICT RULES:
                   e.stopPropagation();
                   abortControllerRef.current?.();
                 }} 
-                className="px-3 py-1 rounded bg-[rgba(239,68,68,0.1)] text-red-400 border border-red-500/20 hover:bg-[rgba(239,68,68,0.2)] transition-colors z-10 relative cursor-pointer font-sans"
+                className="px-3 py-1 rounded-lg bg-[var(--danger-bg)] text-[var(--danger)] border border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.15)] transition-colors z-10 relative cursor-pointer font-sans text-xs"
               >
                 Cancel Ingestion
               </button>
@@ -2141,21 +2363,19 @@ STRICT RULES:
   };
 
   const PreviewSection = () => {
-    const [search, setSearch] = useState('');
-    
-    const filteredData = useMemo(() => {
-      if (!search) return data.slice(0, 100);
-      const lower = search.toLowerCase();
+    const filteredData = (() => {
+      if (!previewSearch) return data.slice(0, 100);
+      const lower = previewSearch.toLowerCase();
       return data.filter(row => 
         Object.values(row).some(val => String(val).toLowerCase().includes(lower))
       ).slice(0, 100);
-    }, [data, search]);
+    })();
 
     if (!data.length) return <div className="text-center mt-20">No data loaded</div>;
 
     const getIcon = (type: ColumnType) => {
-      if (type === 'number') return <Hash size={14} className="text-[#22D3EE]" />;
-      if (type === 'date') return <Calendar size={14} className="text-[#10B981]" />;
+      if (type === 'number') return <Hash size={14} className="text-[#3B82F6]" />;
+      if (type === 'date') return <Calendar size={14} className="text-[#8B5CF6]" />;
       return <Type size={14} className="text-[#94A3B8]" />;
     };
 
@@ -2172,10 +2392,11 @@ STRICT RULES:
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted" size={16} />
               <input 
                 type="text" 
-                className="premium-input pl-10" 
+                className="premium-input" 
+                style={{ paddingLeft: '38px' }}
                 placeholder="Search across rows..." 
-                value={search}
-                onChange={e => setSearch(e.target.value)}
+                value={previewSearch}
+                onChange={e => setPreviewSearch(e.target.value)}
               />
             </div>
           </div>
@@ -2220,29 +2441,28 @@ STRICT RULES:
 
   const StatsSection = () => {
     const numericCols = columns.filter(c => c.type === 'number');
-    const [selectedCol, setSelectedCol] = useState(numericCols[0]?.name || '');
+    const activeCol = statsSelectedCol || numericCols[0]?.name || '';
 
     if (!data.length) return <div className="text-center mt-20">No data loaded</div>;
     if (numericCols.length === 0) return <div className="text-center mt-20">No numeric columns found in dataset.</div>;
 
-    const statsDetail = selectedCol ? calculateStats(data, selectedCol) : null;
+    const statsDetail = activeCol ? calculateStats(data, activeCol) : null;
 
     return (
       <div className="fade-in-up stagger-1 flex flex-col h-full">
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
             <h2>Statistical Summary</h2>
             <p className="text-muted mt-1">Descriptive statistics for numeric columns</p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium">Select Column:</span>
-            <select 
-              className="premium-input premium-select w-48"
-              value={selectedCol}
-              onChange={e => setSelectedCol(e.target.value)}
-            >
-              {numericCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-            </select>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <span className="text-sm font-medium whitespace-nowrap">Select Column:</span>
+            <CustomSelect 
+              className="w-full sm:w-48"
+              value={activeCol}
+              onChange={setStatsSelectedCol}
+              options={numericCols.map(c => ({ value: c.name, label: c.name }))}
+            />
           </div>
         </div>
 
@@ -2326,7 +2546,7 @@ STRICT RULES:
   };
 
   const CleaningSection = () => {
-    const [selectedCol, setSelectedCol] = useState(columns[0]?.name || '');
+    const selectedCol = cleaningSelectedCol || columns[0]?.name || '';
     
     const handleDropDuplicates = () => {
         const unique = new Set();
@@ -2450,7 +2670,7 @@ STRICT RULES:
             description: `Dropped column: ${selectedCol}`,
             droppedColumn: { name: selectedCol, type, colData: data.map(d => d[selectedCol]) }
         });
-        setSelectedCol(columns.filter(c => c.name !== selectedCol)[0]?.name || '');
+        setCleaningSelectedCol(columns.filter(c => c.name !== selectedCol)[0]?.name || '');
         addToast(`Dropped column: ${selectedCol}`, 'success');
     };
 
@@ -2502,13 +2722,15 @@ STRICT RULES:
         </div>
         
         <div className="grid-2">
-            <div className="premium-card issue-card has-issue">
+            <div className="premium-card">
                 <h3 className="mb-4">Column Operations</h3>
                 <div className="mb-4">
                   <label className="input-label mb-2 block">Target Column</label>
-                  <select className="premium-input premium-select w-full" value={selectedCol} onChange={e=>setSelectedCol(e.target.value)}>
-                      {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({c.type})</option>)}
-                  </select>
+                  <CustomSelect 
+                    value={selectedCol} 
+                    onChange={setCleaningSelectedCol} 
+                    options={columns.map(c => ({ value: c.name, label: `${c.name} (${c.type})` }))}
+                  />
                 </div>
                 <div className="flex flex-col gap-3">
                     <div className="flex gap-2">
@@ -2532,7 +2754,7 @@ STRICT RULES:
                 </div>
             </div>
 
-            <div className="premium-card issue-card has-issue">
+            <div className="premium-card">
                 <h3 className="mb-4">Outlier Detection (IQR)</h3>
                 <p className="text-sm text-muted mb-6">Detect and handle statistical outliers in the selected numeric column.</p>
                 <div className="flex flex-col gap-3">
@@ -2549,172 +2771,21 @@ STRICT RULES:
     );
   };
 
-  const PivotSection = () => {
-    const numericCols = columns.filter(c => c.type === 'number');
-    const [rowField, setRowField] = useState(columns[0]?.name || '');
-    const [colField, setColField] = useState('');
-    const [valField, setValField] = useState(numericCols[0]?.name || '');
-    const [aggFunc, setAggFunc] = useState<'sum'|'avg'|'count'|'min'|'max'>('sum');
 
-    const pivotData = useMemo(() => {
-        if (!rowField || !valField) return { rows: [], cols: [], matrix: {} };
-        const matrix: any = {};
-        const rowKeys = new Set<string>();
-        const colKeys = new Set<string>();
-
-        data.forEach(row => {
-            const r = String(row[rowField] || 'N/A');
-            const c = colField ? String(row[colField] || 'N/A') : 'Total';
-            const v = Number(row[valField]);
-
-            rowKeys.add(r);
-            if (colField) colKeys.add(c);
-
-            if (!matrix[r]) matrix[r] = {};
-            if (!matrix[r][c]) {
-                matrix[r][c] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
-            }
-            if (!isNaN(v)) {
-                matrix[r][c].sum += v;
-                matrix[r][c].count += 1;
-                if (v < matrix[r][c].min) matrix[r][c].min = v;
-                if (v > matrix[r][c].max) matrix[r][c].max = v;
-            }
-        });
-
-        const sortedRows = Array.from(rowKeys).sort();
-        const sortedCols = colField ? Array.from(colKeys).sort() : ['Total'];
-
-        return { rows: sortedRows, cols: sortedCols, matrix };
-    }, [data, rowField, colField, valField, aggFunc]);
-
-    const getAggValue = (r: string, c: string) => {
-        const cell = pivotData.matrix[r]?.[c];
-        if (!cell || cell.count === 0) return '-';
-        switch (aggFunc) {
-            case 'sum': return cell.sum.toFixed(2);
-            case 'avg': return (cell.sum / cell.count).toFixed(2);
-            case 'count': return cell.count;
-            case 'min': return cell.min.toFixed(2);
-            case 'max': return cell.max.toFixed(2);
-        }
-    };
-
-    const exportPivotCSV = () => {
-        const rows = pivotData.rows;
-        const cols = pivotData.cols;
-        let csvContent = "Row," + cols.join(",") + "\n";
-        
-        rows.forEach(r => {
-            let rowString = `"${r}",`;
-            const rowValues = cols.map(c => {
-                const val = getAggValue(r, c);
-                return `"${val}"`;
-            });
-            rowString += rowValues.join(",");
-            csvContent += rowString + "\n";
-        });
-        
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
-        link.setAttribute("href", url);
-        link.setAttribute("download", `${filePrefix}_pivot.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        addToast("Pivot table exported as CSV", "success");
-    };
-
-    return (
-      <div className="fade-in-up stagger-1 flex flex-col h-full">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2>Pivot Table</h2>
-            <p className="text-muted mt-1">Multi-dimensional data summarization</p>
-          </div>
-          <button className="btn-secondary" onClick={exportPivotCSV}>
-            <Download size={16} /> Export CSV
-          </button>
-        </div>
-        
-        <div className="premium-card p-4 mb-6 flex gap-4 items-end flex-wrap">
-            <div className="flex-1 min-w-[200px]">
-                <label className="input-label mb-1 block">Row</label>
-                <select className="premium-input premium-select w-full" value={rowField} onChange={e=>setRowField(e.target.value)}>
-                    {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
-            </div>
-            <div className="flex-1 min-w-[200px]">
-                <label className="input-label mb-1 block">Column (Optional)</label>
-                <select className="premium-input premium-select w-full" value={colField} onChange={e=>setColField(e.target.value)}>
-                    <option value="">None</option>
-                    {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
-            </div>
-            <div className="flex-1 min-w-[200px]">
-                <label className="input-label mb-1 block">Value</label>
-                <select className="premium-input premium-select w-full" value={valField} onChange={e=>setValField(e.target.value)}>
-                    {numericCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
-            </div>
-            <div className="flex-1 min-w-[200px]">
-                <label className="input-label mb-1 block">Aggregation</label>
-                <select className="premium-input premium-select w-full" value={aggFunc} onChange={e=>setAggFunc(e.target.value as any)}>
-                    <option value="sum">Sum</option>
-                    <option value="avg">Average</option>
-                    <option value="count">Count</option>
-                    <option value="min">Minimum</option>
-                    <option value="max">Maximum</option>
-                </select>
-            </div>
-        </div>
-
-        <div className="table-container p-0 overflow-hidden flex-1 flex flex-col relative">
-          <div className="table-fade-indicator"></div>
-          <div className="table-scroll-hint">Pinch to zoom, swipe to scroll</div>
-          <div className="flex-1 overflow-auto">
-            <table className="premium-table pivot-table">
-              <thead>
-                <tr>
-                  <th>{rowField}</th>
-                  {pivotData.cols.map(c => <th key={c}>{c}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {pivotData.rows.map(r => (
-                  <tr key={r}>
-                    <td className="font-semibold text-[var(--text-secondary)]">{r}</td>
-                    {pivotData.cols.map(c => (
-                        <td key={c} className="td-number text-[var(--text-primary)]">{getAggValue(r, c)}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const EdaSection = () => {
     const numericCols = columns.filter(c => c.type === 'number');
-    const [insights, setInsights] = useState<string[]>([]);
-    const [loadingInsights, setLoadingInsights] = useState(false);
 
     const generateInsights = async () => {
-        setLoadingInsights(true);
+        setEdaLoadingInsights(true);
         try {
             let context = `Columns: ${columns.map(c => c.name).join(', ')}. \nHere are 5 samples: ${JSON.stringify(data.slice(0,5))}. \nGive exactly 5 bullet points of quick data analytics insights based on this data. Format as just 5 short, punchy plain text strings separated by newlines. No markdown bullets.`;
             const result = await callAI({ prompt: context });
             const text = result.text || "";
-            setInsights(text.split('\n').filter((l: string) => l.trim().length > 0).slice(0,5).map((s: string) => s.replace(/^[-*•]\s*/, '').trim()));
+            setEdaInsights(text.split('\n').filter((l: string) => l.trim().length > 0).slice(0,5).map((s: string) => s.replace(/^[-*•]\s*/, '').trim()));
         } catch (e: any) {
             addToast('AI key not configured or error occurred', 'warning');
-            setInsights([
+            setEdaInsights([
                 "The dataset contains structural patterns that might be useful.",
                 "Numeric columns show varied distributions.",
                 "Ensure no unexpected nulls restrict visualization.",
@@ -2722,7 +2793,7 @@ STRICT RULES:
                 "Filter specific categories for more detailed analysis."
             ]);
         } finally {
-            setLoadingInsights(false);
+            setEdaLoadingInsights(false);
         }
     };
 
@@ -2774,7 +2845,7 @@ STRICT RULES:
         }
     };
 
-    const correlationMatrix = useMemo(() => {
+    const correlationMatrix = (() => {
         const matrix: any = {};
         numericCols.forEach(c1 => {
             matrix[c1.name] = {};
@@ -2800,7 +2871,7 @@ STRICT RULES:
             });
         });
         return matrix;
-    }, [data, numericCols]);
+    })();
 
     return (
       <div className="fade-in-up stagger-1 flex flex-col h-full">
@@ -2818,15 +2889,15 @@ STRICT RULES:
             <div className="premium-card mb-6">
                 <div className="flex justify-between items-start mb-6">
                     <h3 className="flex items-center gap-2"><Sparkles className="text-[var(--primary)]"/> Top 5 AI Insights</h3>
-                    <button className="btn-secondary text-xs py-1" onClick={generateInsights} disabled={loadingInsights}>
-                        {loadingInsights ? 'Analyzing...' : 'Generate New'}
+                    <button className="btn-secondary text-xs py-1" onClick={generateInsights} disabled={edaLoadingInsights}>
+                        {edaLoadingInsights ? 'Analyzing...' : 'Generate New'}
                     </button>
                 </div>
-                {insights.length === 0 ? (
+                {edaInsights.length === 0 ? (
                     <div className="text-center py-8 text-muted">Click generate to analyze data patterns.</div>
                 ) : (
                     <div className="flex flex-col gap-3">
-                        {insights.map((ins, i) => (
+                        {edaInsights.map((ins, i) => (
                             <div key={i} className="eda-insight-card bg-[rgba(255,255,255,0.02)] p-4 rounded-lg text-sm leading-relaxed shadow-sm">
                                 {ins}
                             </div>
@@ -2874,11 +2945,6 @@ STRICT RULES:
   };
 
   const ChatSection = () => {
-     useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-     }, [chatMessages, chatTyping]);
 
      const sendMessage = async (text: string) => {
          if (!text.trim()) return;
@@ -2967,20 +3033,26 @@ STRICT RULES:
            </div>
            <div className="flex gap-2 flex-wrap items-center">
                <span className="text-xs text-muted">History: {chatMessages.length}/10</span>
-               <select className="premium-input premium-select h-8 text-xs py-0 w-32" onChange={(e) => {
-                   if (e.target.value) {
-                       const c = savedConversations[parseInt(e.target.value)];
-                       if (c && window.confirm("Load conversation? Current unsaved chat will be lost.")) {
-                           setChatMessages(c.messages);
-                           setChatMemory(c.memory || '');
-                           addToast("Conversation loaded", "info");
-                       }
-                       e.target.value = "";
-                   }
-               }}>
-                   <option value="">Load Saved...</option>
-                   {savedConversations.map((c, i) => <option key={i} value={i}>{c.name}</option>)}
-               </select>
+                <CustomSelect 
+                  size="sm"
+                  className="w-32"
+                  value=""
+                  onChange={(val) => {
+                    if (val) {
+                      const idx = parseInt(val);
+                      const c = savedConversations[idx];
+                      if (c && window.confirm("Load conversation? Current unsaved chat will be lost.")) {
+                        setChatMessages(c.messages);
+                        setChatMemory(c.memory || '');
+                        addToast("Conversation loaded", "info");
+                      }
+                    }
+                  }}
+                  options={[
+                    { value: "", label: "Load Saved..." },
+                    ...savedConversations.map((c, i) => ({ value: String(i), label: c.name }))
+                  ]}
+                />
                <button className="btn-secondary h-8 px-3 text-xs" onClick={() => {
                    const name = prompt("Enter conversation name to save:");
                    if (name) {
@@ -3068,7 +3140,7 @@ STRICT RULES:
       <div style={{
         background: 'rgba(13, 17, 23, 0.9)',
         backdropFilter: 'blur(12px)',
-        border: '1px solid #1E2D3D',
+        border: '1px solid #E2E8F0',
         borderRadius: '8px',
         padding: '12px',
         color: '#F1F5F9'
@@ -3078,7 +3150,7 @@ STRICT RULES:
           <div key={`item-${index}`} className="flex items-center gap-2 mt-1">
             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color || entry.fill || '#6366F1' }} />
             <span className="text-sm font-semibold">{entry.name}:</span>
-            <span className="font-mono text-sm font-bold text-[#22D3EE]">{entry.value}</span>
+            <span className="font-mono text-sm font-bold text-[#3B82F6]">{entry.value}</span>
           </div>
         ))}
       </div>
@@ -3087,301 +3159,302 @@ STRICT RULES:
   return null;
 };
 
+const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg' = 'png', fileInfo: any, addToast: any) => {
+  addToast(`Generating ${format.toUpperCase()}...`, 'info');
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  
+  const element = document.getElementById(id);
+  if (!element) {
+    addToast('Chart element not found', 'error');
+    return;
+  }
+  
+  const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
+  const safeFileName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+  if (format === 'svg') {
+    try {
+      const svgElement = element.querySelector('svg');
+      if (!svgElement) {
+         addToast('SVG not found for this chart', 'error');
+         return;
+      }
+      const clone = svgElement.cloneNode(true) as SVGElement;
+      if (!clone.getAttribute('xmlns')) {
+          clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      }
+      const svgData = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `${filePrefix}_chart_${safeFileName}.svg`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      addToast('Exported SVG successfully', 'success');
+    } catch (err) {
+      addToast('Failed to export SVG', 'error');
+    }
+    return;
+  }
+
+  try {
+    const canvas = await html2canvas(element, { 
+      scale: 2, 
+      backgroundColor: '#0D1117',
+      useCORS: true,
+      allowTaint: true
+    });
+    const imgData = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.download = `${filePrefix}_chart_${safeFileName}.png`;
+    a.href = imgData;
+    a.click();
+    addToast('Exported PNG successfully', 'success');
+  } catch (e) {
+    console.error(e);
+    addToast('Export failed', 'error');
+  }
+};
+
+const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportingPDF, fileInfo, addToast }: { title: string, type: 'bar' | 'line' | 'pie' | 'scatter' | 'hist' | 'area', id: string, data: any[], columns: any[], isSampledView: boolean, isExportingPDF: boolean, fileInfo: any, addToast: any }) => {
+  const numericCols = columns.filter(c => c.type === 'number');
+  const allCols = columns;
+  const [xAxis, setXAxis] = useState(allCols[0]?.name || '');
+  const [yAxis, setYAxis] = useState(numericCols[0]?.name || '');
+  const [chartTitle, setChartTitle] = useState(title);
+  const isMobile = useWindowWidth() < 768;
+  
+  const { sampledData, totalRows, isSampled } = useSampledData(data, isSampledView);
+
+  const chartData = useMemo(() => {
+    if (type === 'hist') {
+      const values = sampledData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
+      if (!values.length) return [];
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const binCount = 10;
+      const binSize = (max - min) / binCount || 1;
+      const bins = Array.from({length: binCount}, (_, i) => ({
+        name: `${(min + i * binSize).toFixed(1)} - ${(min + (i + 1) * binSize).toFixed(1)}`,
+        count: 0
+      }));
+      values.forEach(v => {
+        let idx = Math.floor((v - min) / binSize);
+        if (idx >= binCount) idx = binCount - 1;
+        if (bins[idx]) bins[idx].count++;
+      });
+      return bins;
+    }
+    
+    let sliceData = sampledData; 
+    
+    if (type === 'pie') {
+       const aggregated: Record<string, number> = {};
+       sliceData.forEach(d => {
+         const key = String(d[xAxis] || 'Unknown');
+         const val = Number(d[yAxis]) || 0;
+         aggregated[key] = (aggregated[key] || 0) + val;
+       });
+       const result = Object.entries(aggregated).map(([name, value]) => ({ name, value }));
+       return result.sort((a,b) => b.value - a.value).slice(0, 10);
+    }
+
+    if (type === 'scatter') {
+       if (sliceData.length > 1000) {
+           const xValues = sliceData.map(d => Number(d[xAxis])).filter(n => !isNaN(n));
+           const yValues = sliceData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
+           if (!xValues.length || !yValues.length) return [];
+
+           const minX = Math.min(...xValues);
+           const maxX = Math.max(...xValues);
+           const minY = Math.min(...yValues);
+           const maxY = Math.max(...yValues);
+
+           const gridX = 20;
+           const gridY = 20;
+           const stepX = (maxX - minX) / gridX || 1;
+           const stepY = (maxY - minY) / gridY || 1;
+
+           const binMap = new Map<string, any>();
+
+           sliceData.forEach(d => {
+               const x = Number(d[xAxis]);
+               const y = Number(d[yAxis]);
+               if (isNaN(x) || isNaN(y)) return;
+
+               let idxX = Math.floor((x - minX) / stepX);
+               if (idxX >= gridX) idxX = gridX - 1;
+               let idxY = Math.floor((y - minY) / stepY);
+               if (idxY >= gridY) idxY = gridY - 1;
+
+               const key = `${idxX},${idxY}`;
+               if (!binMap.has(key)) {
+                   binMap.set(key, { 
+                       [xAxis]: minX + (idxX * stepX) + (stepX / 2), 
+                       [yAxis]: minY + (idxY * stepY) + (stepY / 2), 
+                       count: 0 
+                   });
+               }
+               binMap.get(key).count += 1;
+           });
+
+           return Array.from(binMap.values());
+       }
+    }
+
+    return sliceData.map(d => ({
+      ...d,
+      [yAxis]: Number(d[yAxis])
+    }));
+  }, [xAxis, yAxis, type, sampledData, columns]);
+
+  return (
+    <div className="premium-card flex flex-col" id={id} style={{height: 450}}>
+      <div className="flex justify-between items-start mb-4">
+        <div className="flex flex-col">
+          <input 
+            type="text" 
+            value={chartTitle}
+            onChange={e => setChartTitle(e.target.value)}
+            className="bg-transparent border-b border-transparent focus:border-[var(--primary)] outline-none font-semibold text-lg max-w-[200px]"
+          />
+          {isSampled && (
+            <span className="text-[10px] text-teal-400 font-mono mt-1 bg-teal-400/10 inline-block px-2 py-0.5 rounded w-max">
+              Sampling indicator: Showing {sampledData.length.toLocaleString()} of {totalRows.toLocaleString()} rows
+            </span>
+          )}
+          {type === 'scatter' && isSampledView === false && sampledData.length > 1000 && (
+             <span className="text-[10px] text-orange-400 font-mono mt-1 bg-orange-400/10 inline-block px-2 py-0.5 rounded w-max">
+               2D Binned (Count Z-Axis)
+             </span>
+          )}
+        </div>
+        <div className="flex gap-1">
+          <button className="btn-icon" title="Download SVG" onClick={() => downloadChart(id, chartTitle, 'svg', fileInfo, addToast)}>
+            <span className="text-[10px] font-mono font-bold mr-1 opacity-70">SVG</span> <Download size={14} />
+          </button>
+          <button className="btn-icon" title="Download PNG" onClick={() => downloadChart(id, chartTitle, 'png', fileInfo, addToast)}>
+            <span className="text-[10px] font-mono font-bold mr-1 opacity-70">PNG</span> <Download size={14} />
+          </button>
+        </div>
+      </div>
+      <div className="flex gap-2 mb-4">
+        {type !== 'hist' && (
+          <CustomSelect 
+            size="sm"
+            className="flex-1"
+            value={xAxis}
+            onChange={setXAxis}
+            options={allCols.map(c => ({ value: c.name, label: c.name }))}
+          />
+        )}
+        <CustomSelect 
+          size="sm"
+          className="flex-1"
+          value={yAxis}
+          onChange={setYAxis}
+          options={numericCols.map(c => ({ value: c.name, label: c.name }))}
+        />
+      </div>
+      <div className="flex-1 min-h-0 w-full relative">
+        <ResponsiveContainer width="100%" height="100%">
+          {type === 'bar' ? (
+            <BarChart data={chartData} layout={isMobile ? "vertical" : "horizontal"} margin={{top: 10, right: 10, left: isMobile ? 30 : 0, bottom: 20}}>
+              <defs>
+                <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
+                  <stop offset="100%" stopColor="#8B5CF6" stopOpacity={1}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={!isMobile} horizontal={isMobile} />
+              <XAxis dataKey={isMobile ? yAxis : xAxis} type={isMobile ? "number" : "category"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis dataKey={isMobile ? xAxis : undefined} type={isMobile ? "category" : "number"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
+              <Bar dataKey={yAxis} fill="url(#barGradient)" radius={isMobile ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={24} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </BarChart>
+          ) : type === 'area' ? (
+            <AreaChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <defs>
+                <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} />
+              <Area type="monotone" dataKey={yAxis} stroke="#3B82F6" fillOpacity={1} fill="url(#colorGradient)" strokeWidth={3} activeDot={{r: 6, strokeWidth: 0, fill: '#3B82F6'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </AreaChart>
+          ) : type === 'line' ? (
+            <LineChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} />
+              <Line type="monotone" dataKey={yAxis} stroke="#3B82F6" strokeWidth={3} dot={false} activeDot={{r: 6, strokeWidth: 0, fill: '#3B82F6'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </LineChart>
+          ) : type === 'pie' ? (
+            <PieChart margin={{top: 10, right: 10, left: 10, bottom: 10}}>
+              <Pie data={chartData} cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={5} dataKey="value" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out">
+                {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
+              </Pie>
+              <RechartsTooltip content={<CustomTooltip />} />
+              {!isMobile && <Legend verticalAlign="top" align="right" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', color: 'var(--text-secondary)'}} />}
+            </PieChart>
+          ) : type === 'scatter' ? (
+            <ScatterChart margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis type="number" dataKey={xAxis} name={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} />
+              <YAxis type="number" dataKey={yAxis} name={yAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} />
+              <ZAxis dataKey={chartData[0] && chartData[0].count !== undefined ? 'count' : ''} range={[20, 200]} />
+              <RechartsTooltip content={<CustomTooltip />} />
+              <Scatter data={chartData} fill="#3B82F6" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </ScatterChart>
+          ) : (
+            <BarChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
+              <defs>
+                <linearGradient id="barGradient2" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
+                  <stop offset="100%" stopColor="#8B5CF6" stopOpacity={1}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 4" stroke="#E2E8F0" vertical={false} />
+              <XAxis dataKey="name" tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+              <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
+              <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
+              <Bar dataKey="count" fill="url(#barGradient2)" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+
 const ChartsSection = () => {
     const numericCols = columns.filter(c => c.type === 'number');
-    const allCols = columns;
-    const [isSampledView, setIsSampledView] = useState(true);
+    const isSampledView = chartsIsSampledView;
 
     if (!data.length) return <div className="text-center mt-20">No data loaded</div>;
     if (numericCols.length === 0) return <div className="text-center mt-20">Numeric columns required for charting.</div>;
 
-    const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg' = 'png') => {
-      addToast(`Generating ${format.toUpperCase()}...`, 'info');
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      
-      const element = document.getElementById(id);
-      if (!element) {
-        addToast('Chart element not found', 'error');
-        return;
-      }
-      
-      const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
-      const safeFileName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-
-      if (format === 'svg') {
-        try {
-          const svgElement = element.querySelector('svg');
-          if (!svgElement) {
-             addToast('SVG not found for this chart', 'error');
-             return;
-          }
-          const clone = svgElement.cloneNode(true) as SVGElement;
-          if (!clone.getAttribute('xmlns')) {
-              clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-          }
-          const svgData = new XMLSerializer().serializeToString(clone);
-          const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.setAttribute("href", url);
-          link.setAttribute("download", `${filePrefix}_chart_${safeFileName}.svg`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          addToast('Exported SVG successfully', 'success');
-        } catch (err) {
-          addToast('Failed to export SVG', 'error');
-        }
-        return;
-      }
-
-      try {
-        const canvas = await html2canvas(element, { 
-          scale: 2, 
-          backgroundColor: '#0D1117',
-          useCORS: true,
-          allowTaint: true
-        });
-        const imgData = canvas.toDataURL('image/png');
-        const a = document.createElement('a');
-        a.download = `${filePrefix}_chart_${safeFileName}.png`;
-        a.href = imgData;
-        a.click();
-        addToast('Exported PNG successfully', 'success');
-      } catch (e) {
-        console.error(e);
-        addToast('Export failed', 'error');
-      }
-    };
-
-    const ChartWidget = ({ title, type, id }: { title: string, type: 'bar' | 'line' | 'pie' | 'scatter' | 'hist' | 'area', id: string }) => {
-      const [xAxis, setXAxis] = useState(allCols[0]?.name || '');
-      const [yAxis, setYAxis] = useState(numericCols[0]?.name || '');
-      const [chartTitle, setChartTitle] = useState(title);
-      const isMobile = useWindowWidth() < 768;
-      
-      const { sampledData, totalRows, isSampled } = useSampledData(data, isSampledView);
-
-      const chartData = useMemo(() => {
-        if (type === 'hist') {
-          const values = sampledData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
-          if (!values.length) return [];
-          const min = Math.min(...values);
-          const max = Math.max(...values);
-          const binCount = 10;
-          const binSize = (max - min) / binCount || 1;
-          const bins = Array.from({length: binCount}, (_, i) => ({
-            name: `${(min + i * binSize).toFixed(1)} - ${(min + (i + 1) * binSize).toFixed(1)}`,
-            count: 0
-          }));
-          values.forEach(v => {
-            let idx = Math.floor((v - min) / binSize);
-            if (idx >= binCount) idx = binCount - 1;
-            if (bins[idx]) bins[idx].count++;
-          });
-          return bins;
-        }
-        
-        let sliceData = sampledData; 
-        
-        if (type === 'pie') {
-           const aggregated: Record<string, number> = {};
-           sliceData.forEach(d => {
-             const key = String(d[xAxis] || 'Unknown');
-             const val = Number(d[yAxis]) || 0;
-             aggregated[key] = (aggregated[key] || 0) + val;
-           });
-           const result = Object.entries(aggregated).map(([name, value]) => ({ name, value }));
-           return result.sort((a,b) => b.value - a.value).slice(0, 10);
-        }
-
-        if (type === 'scatter') {
-           if (sliceData.length > 1000) {
-               const xValues = sliceData.map(d => Number(d[xAxis])).filter(n => !isNaN(n));
-               const yValues = sliceData.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
-               if (!xValues.length || !yValues.length) return [];
-
-               const minX = Math.min(...xValues);
-               const maxX = Math.max(...xValues);
-               const minY = Math.min(...yValues);
-               const maxY = Math.max(...yValues);
-
-               const gridX = 20;
-               const gridY = 20;
-               const stepX = (maxX - minX) / gridX || 1;
-               const stepY = (maxY - minY) / gridY || 1;
-
-               const binMap = new Map<string, any>();
-
-               sliceData.forEach(d => {
-                   const x = Number(d[xAxis]);
-                   const y = Number(d[yAxis]);
-                   if (isNaN(x) || isNaN(y)) return;
-
-                   let idxX = Math.floor((x - minX) / stepX);
-                   if (idxX >= gridX) idxX = gridX - 1;
-                   let idxY = Math.floor((y - minY) / stepY);
-                   if (idxY >= gridY) idxY = gridY - 1;
-
-                   const key = `${idxX},${idxY}`;
-                   if (!binMap.has(key)) {
-                       binMap.set(key, { 
-                           [xAxis]: minX + (idxX * stepX) + (stepX / 2), 
-                           [yAxis]: minY + (idxY * stepY) + (stepY / 2), 
-                           count: 0 
-                       });
-                   }
-                   binMap.get(key).count += 1;
-               });
-
-               return Array.from(binMap.values());
-           }
-        }
-
-        return sliceData.map(d => ({
-          ...d,
-          [yAxis]: Number(d[yAxis])
-        }));
-      }, [xAxis, yAxis, type, sampledData]);
-
-      const Header = () => (
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex flex-col">
-            <input 
-              type="text" 
-              value={chartTitle}
-              onChange={e => setChartTitle(e.target.value)}
-              className="bg-transparent border-b border-transparent focus:border-[var(--primary)] outline-none font-semibold text-lg max-w-[200px]"
-            />
-            {isSampled && (
-              <span className="text-[10px] text-teal-400 font-mono mt-1 bg-teal-400/10 inline-block px-2 py-0.5 rounded w-max">
-                Sampling indicator: Showing {sampledData.length.toLocaleString()} of {totalRows.toLocaleString()} rows
-              </span>
-            )}
-            {type === 'scatter' && isSampledView === false && sampledData.length > 1000 && (
-               <span className="text-[10px] text-orange-400 font-mono mt-1 bg-orange-400/10 inline-block px-2 py-0.5 rounded w-max">
-                 2D Binned (Count Z-Axis)
-               </span>
-            )}
-          </div>
-          <div className="flex gap-1">
-            <button className="btn-icon" title="Download SVG" onClick={() => downloadChart(id, chartTitle, 'svg')}>
-              <span className="text-[10px] font-mono font-bold mr-1 opacity-70">SVG</span> <Download size={14} />
-            </button>
-            <button className="btn-icon" title="Download PNG" onClick={() => downloadChart(id, chartTitle, 'png')}>
-              <span className="text-[10px] font-mono font-bold mr-1 opacity-70">PNG</span> <Download size={14} />
-            </button>
-          </div>
-        </div>
-      );
-
-      const Selectors = () => (
-        <div className="flex gap-2 mb-4">
-          {type !== 'hist' && (
-            <select className="premium-input premium-select flex-1 text-xs" value={xAxis} onChange={e => setXAxis(e.target.value)}>
-              {allCols.map(c => <option key={`x-${c.name}`} value={c.name}>{c.name}</option>)}
-            </select>
-          )}
-          <select className="premium-input premium-select flex-1 text-xs" value={yAxis} onChange={e => setYAxis(e.target.value)}>
-            {numericCols.map(c => <option key={`y-${c.name}`} value={c.name}>{c.name}</option>)}
-          </select>
-        </div>
-      );
-
-      return (
-        <div className="premium-card flex flex-col" id={id} style={{height: 450}}>
-          <Header />
-          <Selectors />
-          <div className="flex-1 min-h-0 w-full relative">
-            <ResponsiveContainer width="100%" height="100%">
-              {type === 'bar' ? (
-                <BarChart data={chartData} layout={isMobile ? "vertical" : "horizontal"} margin={{top: 10, right: 10, left: isMobile ? 30 : 0, bottom: 20}}>
-                  <defs>
-                    <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#22D3EE" stopOpacity={1}/>
-                      <stop offset="100%" stopColor="#6366F1" stopOpacity={1}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={!isMobile} horizontal={isMobile} />
-                  <XAxis dataKey={isMobile ? yAxis : xAxis} type={isMobile ? "number" : "category"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
-                  <YAxis dataKey={isMobile ? xAxis : undefined} type={isMobile ? "category" : "number"} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} tickLine={false} />
-                  <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
-                  <Bar dataKey={yAxis} fill="url(#barGradient)" radius={isMobile ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={24} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
-                </BarChart>
-              ) : type === 'area' ? (
-                <AreaChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
-                  <defs>
-                    <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366F1" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#22D3EE" stopOpacity={0.1}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                  <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
-                  <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey={yAxis} stroke="#6366F1" fillOpacity={1} fill="url(#colorGradient)" strokeWidth={3} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
-                </AreaChart>
-              ) : type === 'line' ? (
-                <LineChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
-                  <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                  <XAxis dataKey={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
-                  <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Line type="monotone" dataKey={yAxis} stroke="#6366F1" strokeWidth={3} dot={false} activeDot={{r: 6, strokeWidth: 0, fill: '#22D3EE'}} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
-                </LineChart>
-              ) : type === 'pie' ? (
-                <PieChart margin={{top: 10, right: 10, left: 10, bottom: 10}}>
-                  <Pie data={chartData} cx="50%" cy="50%" innerRadius="60%" outerRadius="80%" paddingAngle={5} dataKey="value" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out">
-                    {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
-                  </Pie>
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  {!isMobile && <Legend verticalAlign="top" align="right" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', color: 'var(--text-secondary)'}} />}
-                </PieChart>
-              ) : type === 'scatter' ? (
-                <ScatterChart margin={{top: 10, right: 10, left: 0, bottom: 20}}>
-                  <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                  <XAxis type="number" dataKey={xAxis} name={xAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} />
-                  <YAxis type="number" dataKey={yAxis} name={yAxis} tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} />
-                  <ZAxis dataKey={chartData[0] && chartData[0].count !== undefined ? 'count' : ''} range={[20, 200]} />
-                  <RechartsTooltip content={<CustomTooltip />} />
-                  <Scatter data={chartData} fill="#22D3EE" isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
-                </ScatterChart>
-              ) : (
-                <BarChart data={chartData} margin={{top: 10, right: 10, left: 0, bottom: 20}}>
-                  <defs>
-                    <linearGradient id="barGradient2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#22D3EE" stopOpacity={1}/>
-                      <stop offset="100%" stopColor="#6366F1" stopOpacity={1}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                  <XAxis dataKey="name" tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={{stroke: '#1E2D3D'}} tickLine={false} />
-                  <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
-                  <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
-                  <Bar dataKey="count" fill="url(#barGradient2)" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
-                </BarChart>
-              )}
-            </ResponsiveContainer>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="fade-in-up stagger-1 flex flex-col h-full">
-        <div className="mb-6 flex justify-between items-center">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div>
             <h2>Interactive Visualizations</h2>
             <p className="text-muted mt-1">Configure and export charts for your analysis</p>
           </div>
-          <div className="flex items-center gap-3 bg-[var(--surface-light)] px-4 py-2 rounded-lg border border-[var(--border)]">
+          <div className="flex items-center gap-3 bg-[var(--surface-light)] px-4 py-2 rounded-lg border border-[var(--border)] w-full sm:w-auto justify-between sm:justify-start">
             <label className="flex items-center gap-2 cursor-pointer text-sm">
               <input 
                 type="checkbox" 
                 checked={isSampledView}
-                onChange={(e) => setIsSampledView(e.target.checked)}
+                onChange={(e) => setChartsIsSampledView(e.target.checked)}
                 className="accent-[var(--primary)] w-4 h-4"
               />
               {isSampledView ? 'Sampled view' : 'Full view (may be slow)'}
@@ -3390,1371 +3463,88 @@ const ChartsSection = () => {
         </div>
         
         <div className="grid-2">
-          <div className="fade-in-up stagger-1"><ChartWidget id="chart-1" type="bar" title="Bar Chart" /></div>
-          <div className="fade-in-up stagger-2"><ChartWidget id="chart-2" type="area" title="Area Chart" /></div>
-          <div className="fade-in-up stagger-3"><ChartWidget id="chart-3" type="line" title="Line Chart" /></div>
-          <div className="fade-in-up stagger-4"><ChartWidget id="chart-4" type="pie" title="Distribution Pie" /></div>
-          <div className="fade-in-up stagger-1"><ChartWidget id="chart-5" type="scatter" title="Scatter Plot" /></div>
-          <div className="fade-in-up stagger-2"><ChartWidget id="chart-6" type="hist" title="Histogram" /></div>
+          <div className="fade-in-up stagger-1">
+            <ChartWidget 
+              id="chart-1" 
+              type="bar" 
+              title="Bar Chart" 
+              data={data}
+              columns={columns}
+              isSampledView={isSampledView}
+              isExportingPDF={isExportingPDF}
+              fileInfo={fileInfo}
+              addToast={addToast}
+            />
+          </div>
+          <div className="fade-in-up stagger-2">
+            <ChartWidget 
+              id="chart-2" 
+              type="area" 
+              title="Area Chart" 
+              data={data}
+              columns={columns}
+              isSampledView={isSampledView}
+              isExportingPDF={isExportingPDF}
+              fileInfo={fileInfo}
+              addToast={addToast}
+            />
+          </div>
+          <div className="fade-in-up stagger-3">
+            <ChartWidget 
+              id="chart-3" 
+              type="line" 
+              title="Line Chart" 
+              data={data}
+              columns={columns}
+              isSampledView={isSampledView}
+              isExportingPDF={isExportingPDF}
+              fileInfo={fileInfo}
+              addToast={addToast}
+            />
+          </div>
+          <div className="fade-in-up stagger-4">
+            <ChartWidget 
+              id="chart-4" 
+              type="pie" 
+              title="Distribution Pie" 
+              data={data}
+              columns={columns}
+              isSampledView={isSampledView}
+              isExportingPDF={isExportingPDF}
+              fileInfo={fileInfo}
+              addToast={addToast}
+            />
+          </div>
+          <div className="fade-in-up stagger-1">
+            <ChartWidget 
+              id="chart-5" 
+              type="scatter" 
+              title="Scatter Plot" 
+              data={data}
+              columns={columns}
+              isSampledView={isSampledView}
+              isExportingPDF={isExportingPDF}
+              fileInfo={fileInfo}
+              addToast={addToast}
+            />
+          </div>
+          <div className="fade-in-up stagger-2">
+            <ChartWidget 
+              id="chart-6" 
+              type="hist" 
+              title="Histogram" 
+              data={data}
+              columns={columns}
+              isSampledView={isSampledView}
+              isExportingPDF={isExportingPDF}
+              fileInfo={fileInfo}
+              addToast={addToast}
+            />
+          </div>
         </div>
       </div>
     );
-  };
-
-  const SqlSection = () => {
-    const [query, setQuery] = useState("SELECT * FROM \nWHERE \nORDER BY \nLIMIT 10");
-    const [queryResult, setQueryResult] = useState<any[] | null>(null);
-    const [sqlError, setSqlError] = useState("");
-
-    const runQuery = () => {
-      try {
-        setSqlError("");
-        if (!query.trim()) {
-           setQueryResult([...data]);
-           return;
-        }
-
-        // Use alasql to run query against data array safely. 
-        // We pass data as a parameter to alasql in an array.
-        // The table is referenced as '?' in the query.
-        // We do a simple replacement if the user typed "FROM data" 
-        // to make it "FROM ?" so alasql knows to bind the array.
-        const q = query.trim().replace(/\n/g, ' ');
-        const preparedQuery = q.replace(/FROM\s+data\b/i, 'FROM ?');
-        
-        let res;
-        if (preparedQuery.toUpperCase().includes('FROM ?')) {
-           res = alasql(preparedQuery, [data]);
-        } else if (!preparedQuery.toUpperCase().includes('FROM')) {
-           // Provide basic query if FROM isn't specified (e.g. they modified things)
-           res = alasql(preparedQuery + ' FROM ?', [data]);
-        } else {
-           // Allow them to use other table names by injecting '?' where first FROM is
-           // but replacing what they typed.
-           const firstFromParams = q.replace(/FROM\s+[a-zA-Z0-9_]+\b/i, 'FROM ?');
-           res = alasql(firstFromParams, [data]);
-        }
-        
-        setQueryResult(res);
-      } catch (e: any) { 
-        setSqlError(e.message || "An error occurred executing SQL query"); 
-        setQueryResult(null); 
-      }
-    };
-
-    const copySqlResults = () => {
-      if (!queryResult || queryResult.length === 0) return;
-      const keys = Object.keys(queryResult[0]);
-      let tsv = keys.join("\t") + "\n";
-      queryResult.forEach(row => {
-        tsv += keys.map(k => String(row[k] ?? '')).join("\t") + "\n";
-      });
-      navigator.clipboard.writeText(tsv);
-      addToast("SQL results copied as TSV", "success");
-    };
-
-    return (
-      <div className="fade-in-up stagger-1 flex flex-col h-full gap-4">
-        <div className="flex justify-between items-center mb-2">
-           <div>
-             <h2>SQL Engine</h2>
-             <p className="text-muted mt-1">Execute query on the uploaded dataset securely</p>
-           </div>
-        </div>
-        <textarea 
-            className="sql-editor" 
-            value={query} 
-            onChange={e=>setQuery(e.target.value)} 
-            spellCheck={false}
-            placeholder="e.g. SELECT name, age FROM data WHERE age > 30 ORDER BY age DESC LIMIT 10"
-        />
-        <div className="flex gap-2">
-           <button className="btn-primary" onClick={runQuery}><Play size={16}/> Run Query</button>
-           {queryResult && (
-             <button className="btn-secondary" onClick={copySqlResults}>Copy TSV To Clipboard</button>
-           )}
-        </div>
-        {sqlError && <div className="p-4 bg-[rgba(239,68,68,0.1)] text-[var(--danger)] border border-[var(--danger)] rounded-lg text-sm font-mono">{sqlError}</div>}
-        {queryResult && (
-           <div className="flex-1 overflow-auto table-container p-0 border border-[var(--border)] rounded-xl relative">
-             <div className="table-fade-indicator"></div>
-             <div className="table-scroll-hint">Pinch to zoom, swipe to scroll</div>
-             <div className="sticky top-0 left-0 bg-[var(--surface)] text-[10px] font-mono p-2 border-b border-[var(--border)] uppercase text-[var(--primary)] text-right">
-                {queryResult.length} Rows Returned
-             </div>
-             <table className="premium-table">
-               <thead>
-                 <tr>{Object.keys(queryResult[0] || {}).map(k => <th key={k}>{k}</th>)}</tr>
-               </thead>
-               <tbody>
-                 {queryResult.map((row, i) => (
-                   <tr key={i}>{Object.values(row).map((v: any, j) => <td key={j}>{String(v)}</td>)}</tr>
-                 ))}
-               </tbody>
-</table>
-           </div>
-        )}
-      </div>
-    );
-  };  const MLLabSection = () => {
-    const numericCols = columns.filter(c => c.type === 'number');
-    const [modelType, setModelType] = useState<'lr' | 'kmeans'>('lr');
-    const [xCol, setXCol] = useState(numericCols[0]?.name || '');
-    const [yCol, setYCol] = useState(numericCols[1]?.name || '');
-    const [trainSplit, setTrainSplit] = useState(80);
-    
-    const [kClusters, setKClusters] = useState(3);
-    const [kmeansCols, setKmeansCols] = useState<string[]>([]);
-    
-    const [predictionInput, setPredictionInput] = useState('');
-    const [predictionResult, setPredictionResult] = useState<number | null>(null);
-
-    const [result, setResult] = useState<any>(null);
-    const [training, setTraining] = useState(false);
-
-    const evaluateModel = (yActual: number[], yPred: number[]) => {
-      const n = yActual.length;
-      if (n === 0) return { r2: 0, mse: 0, mae: 0 };
-      const meanY = yActual.reduce((sum, val) => sum + val, 0) / n;
-      let ssTot = 0;
-      let ssRes = 0;
-      let absErrorSum = 0;
-      for (let i = 0; i < n; i++) {
-        ssTot += Math.pow(yActual[i] - meanY, 2);
-        ssRes += Math.pow(yActual[i] - yPred[i], 2);
-        absErrorSum += Math.abs(yActual[i] - yPred[i]);
-      }
-      const r2 = ssTot === 0 ? 0 : 1 - (ssRes / ssTot);
-      const mse = ssRes / n;
-      const mae = absErrorSum / n;
-      return { r2, mse, mae };
-    };
-
-    const trainModel = () => {
-       if (data.length === 0) {
-          addToast('No data available to train model', 'error');
-          return;
-       }
-       setTraining(true);
-       setResult(null);
-       setPredictionResult(null);
-       setPredictionInput('');
-
-       setTimeout(() => {
-          try {
-              if (modelType === 'lr') {
-                  if (!xCol || !yCol) {
-                      throw new Error('Please select both X and Y columns');
-                  }
-                  
-                  const pairs = data.map(d => ({
-                      x: Number(d[xCol]),
-                      y: Number(d[yCol])
-                  })).filter(p => !isNaN(p.x) && !isNaN(p.y));
-                  
-                  if (pairs.length < 5) {
-                      throw new Error('Dataset must contain at least 5 rows with numeric values for both columns');
-                  }
-                  
-                  const splitRatio = trainSplit / 100;
-                  const shuffled = [...pairs].sort(() => Math.random() - 0.5);
-                  const trainSize = Math.floor(shuffled.length * splitRatio);
-                  const trainPairs = shuffled.slice(0, trainSize);
-                  const testPairs = shuffled.slice(trainSize);
-                  
-                  if (trainPairs.length === 0 || testPairs.length === 0) {
-                      throw new Error('Invalid train/test split. Make sure dataset size is sufficient.');
-                  }
-                  
-                  const xTrain = trainPairs.map(p => p.x);
-                  const yTrain = trainPairs.map(p => p.y);
-                  const xTest = testPairs.map(p => p.x);
-                  const yTest = testPairs.map(p => p.y);
-                  
-                  const regression = new SimpleLinearRegression(xTrain, yTrain);
-                  const m = regression.slope !== undefined ? regression.slope : (regression as any).coefficients[1];
-                  const b = regression.intercept !== undefined ? regression.intercept : (regression as any).coefficients[0];
-                  
-                  const yTrainPred = xTrain.map(xVal => regression.predict(xVal));
-                  const yTestPred = xTest.map(xVal => regression.predict(xVal));
-                  
-                  const trainEval = evaluateModel(yTrain, yTrainPred);
-                  const testEval = evaluateModel(yTest, yTestPred);
-                  
-                  const residuals = testPairs.slice(0, 300).map(p => {
-                      const pred = regression.predict(p.x);
-                      return {
-                          predicted: pred,
-                          residual: p.y - pred
-                      };
-                  });
-                  
-                  setResult({
-                      type: 'lr',
-                      m,
-                      b,
-                      trainR2: trainEval.r2,
-                      testR2: testEval.r2,
-                      trainMse: trainEval.mse,
-                      testMse: testEval.mse,
-                      trainMae: trainEval.mae,
-                      testMae: testEval.mae,
-                      residuals,
-                      regressionInstance: regression,
-                      xLabel: xCol,
-                      yLabel: yCol
-                  });
-                  addToast('Regression model trained successfully', 'success');
-              } else if (modelType === 'kmeans') {
-                  const selectedCols = kmeansCols.length > 0 ? kmeansCols : numericCols.map(c => c.name);
-                  if (selectedCols.length === 0) {
-                      throw new Error('No numeric features available for clustering');
-                  }
-                  
-                  const matrix = data.map(d => selectedCols.map(col => Number(d[col]))).filter(row => row.every(n => !isNaN(n)));
-                  
-                  if (matrix.length < kClusters) {
-                      throw new Error(`Dataset must have at least ${kClusters} rows with valid numeric feature values`);
-                  }
-                  
-                  const kmeansResult = kmeans(matrix, kClusters, {
-                      maxIterations: 100
-                  });
-                  
-                  let finalInertia = 0;
-                  for (let i = 0; i < matrix.length; i++) {
-                      const clusterIdx = kmeansResult.clusters[i];
-                      const centroidCoords = kmeansResult.centroids[clusterIdx];
-                      finalInertia += Math.pow(euclideanDistance(matrix[i], centroidCoords), 2);
-                  }
-                  
-                  const silhouetteSampleSize = Math.min(matrix.length, 300);
-                  const sampledIndices: number[] = [];
-                  const pool = Array.from({ length: matrix.length }, (_, i) => i);
-                  for (let i = 0; i < silhouetteSampleSize; i++) {
-                      const r = Math.floor(Math.random() * pool.length);
-                      sampledIndices.push(pool[r]);
-                      pool[r] = pool[pool.length - 1];
-                      pool.pop();
-                  }
-                  const sampledPoints = sampledIndices.map(idx => matrix[idx]);
-                  const sampledClusters = sampledIndices.map(idx => kmeansResult.clusters[idx]);
-                  const silhouetteScore = calculateSilhouetteScore(sampledPoints, sampledClusters);
-                  
-                  const elbowSampleSize = Math.min(matrix.length, 1000);
-                  const elbowSample = matrix.slice(0, elbowSampleSize);
-                  const elbowData: { k: number; inertia: number }[] = [];
-                  
-                  let k1Inertia = 0;
-                  if (elbowSample.length > 0) {
-                      const meanPoint = Array(selectedCols.length).fill(0);
-                      for (let i = 0; i < elbowSample.length; i++) {
-                          for (let j = 0; j < selectedCols.length; j++) {
-                              meanPoint[j] += elbowSample[i][j];
-                          }
-                      }
-                      meanPoint.forEach((_, idx) => meanPoint[idx] /= elbowSample.length);
-                      for (let i = 0; i < elbowSample.length; i++) {
-                          k1Inertia += Math.pow(euclideanDistance(elbowSample[i], meanPoint), 2);
-                      }
-                  }
-                  elbowData.push({ k: 1, inertia: k1Inertia });
-                  
-                  for (let k = 2; k <= 8; k++) {
-                      try {
-                          const kRes = kmeans(elbowSample, k, { maxIterations: 30 });
-                          let kInertia = 0;
-                          for (let i = 0; i < elbowSample.length; i++) {
-                              const cIdx = kRes.clusters[i];
-                              const centCoords = kRes.centroids[cIdx];
-                              kInertia += Math.pow(euclideanDistance(elbowSample[i], centCoords), 2);
-                          }
-                          elbowData.push({ k, inertia: kInertia });
-                      } catch (err) {
-                          // Ignore
-                      }
-                  }
-                  
-                  const plotSampleSize = Math.min(matrix.length, 500);
-                  const plotSamplePoints = matrix.slice(0, plotSampleSize);
-                  const plotSampleClusters = kmeansResult.clusters.slice(0, plotSampleSize);
-                  
-                  let plotData: any[] = [];
-                  let isPCA = false;
-                  let xLabel = '';
-                  let yLabel = '';
-                  
-                  if (selectedCols.length === 1) {
-                      plotData = plotSamplePoints.map((p, idx) => ({
-                          x: p[0],
-                          y: idx,
-                          cluster: plotSampleClusters[idx]
-                      }));
-                      xLabel = selectedCols[0];
-                      yLabel = 'Index';
-                  } else if (selectedCols.length === 2) {
-                      plotData = plotSamplePoints.map((p, idx) => ({
-                          x: p[0],
-                          y: p[1],
-                          cluster: plotSampleClusters[idx]
-                      }));
-                      xLabel = selectedCols[0];
-                      yLabel = selectedCols[1];
-                  } else {
-                      const { pc1, pc2 } = getPCA2D(plotSamplePoints);
-                      plotData = plotSamplePoints.map((_, idx) => ({
-                          x: pc1[idx],
-                          y: pc2[idx],
-                          cluster: plotSampleClusters[idx]
-                      }));
-                      isPCA = true;
-                      xLabel = 'PC1';
-                      yLabel = 'PC2';
-                  }
-                  
-                  setResult({
-                      type: 'kmeans',
-                      k: kClusters,
-                      inertia: finalInertia,
-                      silhouette: silhouetteScore,
-                      elbowData,
-                      plotData,
-                      isPCA,
-                      xLabel,
-                      yLabel,
-                      selectedCols
-                  });
-                  addToast('K-Means clustering completed', 'success');
-              }
-          } catch (e: any) {
-              console.error(e);
-              addToast(e.message || 'Model training failed', 'error');
-          } finally {
-              setTraining(false);
-          }
-       }, 800);
-    };
-
-    const handlePredict = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!result || result.type !== 'lr' || !predictionInput) return;
-        const xVal = parseFloat(predictionInput);
-        if (isNaN(xVal)) {
-            addToast('Please enter a valid numeric value for X', 'error');
-            return;
-        }
-        try {
-            const yVal = result.regressionInstance.predict(xVal);
-            setPredictionResult(yVal);
-        } catch (err: any) {
-            addToast('Prediction failed: ' + err.message, 'error');
-        }
-    };
-
-    return (
-       <div className="fade-in-up flex gap-6 h-full p-2">
-          <div className="w-80 bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 flex flex-col gap-4 overflow-y-auto">
-             <h3 className="font-semibold text-lg flex items-center gap-2"><Settings size={18}/> Model Config</h3>
-             <div className="grid grid-cols-2 gap-2">
-                <button className={`btn-secondary text-xs ${modelType==='lr'?'border-[var(--primary)] text-[var(--primary)]':''}`} onClick={()=>setModelType('lr')}>Regression</button>
-                <button className={`btn-secondary text-xs ${modelType==='kmeans'?'border-[var(--primary)] text-[var(--primary)]':''}`} onClick={()=>setModelType('kmeans')}>K-Means</button>
-             </div>
-             
-             {modelType === 'lr' && (
-                  <>
-                     <div>
-                       <label className="input-label block mb-1">Feature (X Variable)</label>
-                       <select className="premium-input premium-select w-full" value={xCol} onChange={e=>setXCol(e.target.value)}>
-                           {numericCols.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
-                       </select>
-                     </div>
-                     <div>
-                       <label className="input-label block mb-1">Target (Y Variable)</label>
-                       <select className="premium-input premium-select w-full" value={yCol} onChange={e=>setYCol(e.target.value)}>
-                           {numericCols.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
-                       </select>
-                     </div>
-                     <div>
-                       <label className="input-label block mb-1">Train/Test Split ({trainSplit}%)</label>
-                       <input 
-                         type="range" 
-                         min="50" 
-                         max="90" 
-                         step="5"
-                         value={trainSplit} 
-                         onChange={e=>setTrainSplit(parseInt(e.target.value))} 
-                         className="ml-slider mt-2 w-full" 
-                       />
-                       <div className="flex justify-between text-[10px] text-muted mt-1">
-                          <span>Train: {trainSplit}%</span>
-                          <span>Test: {100 - trainSplit}%</span>
-                       </div>
-                     </div>
-                  </>
-             )}
-             {modelType === 'kmeans' && (
-                  <>
-                     <div>
-                       <label className="input-label block mb-1">Number of Clusters (K)</label>
-                       <input 
-                         type="range" 
-                         min="2" 
-                         max="10" 
-                         value={kClusters} 
-                         onChange={e=>setKClusters(parseInt(e.target.value))} 
-                         className="ml-slider mt-2 w-full" 
-                       />
-                       <div className="text-right text-xs text-muted mt-1">{kClusters} Clusters</div>
-                     </div>
-                     <div className="mt-2">
-                       <label className="input-label block mb-2">Select Features (Numeric Columns)</label>
-                       <div className="flex flex-col gap-2 max-h-48 overflow-y-auto border border-[var(--border)] p-3 rounded-lg bg-[var(--surface-light)]">
-                           {numericCols.map(col => {
-                               const isChecked = kmeansCols.length === 0 ? true : kmeansCols.includes(col.name);
-                               return (
-                                 <label key={col.name} className="flex items-center gap-2 text-xs text-muted hover:text-white cursor-pointer py-1">
-                                    <input 
-                                       type="checkbox" 
-                                       checked={isChecked} 
-                                       onChange={(e) => {
-                                           const current = kmeansCols.length === 0 ? numericCols.map(c => c.name) : kmeansCols;
-                                           if (e.target.checked) {
-                                               setKmeansCols([...current, col.name]);
-                                           } else {
-                                               setKmeansCols(current.filter(c => c !== col.name));
-                                           }
-                                       }}
-                                       className="accent-[var(--primary)] w-3.5 h-3.5"
-                                    />
-                                    <span className="truncate">{col.name}</span>
-                                 </label>
-                               );
-                           })}
-                       </div>
-                       <div className="text-[10px] text-muted mt-1 font-mono">
-                          {kmeansCols.length === 0 ? numericCols.length : kmeansCols.length} features selected
-                       </div>
-                     </div>
-                  </>
-             )}
-             
-             <div className="mt-auto">
-                <button className="btn-primary w-full justify-center" onClick={trainModel} disabled={training}>
-                  {training ? <span className="animate-pulse">Training...</span> : <><Zap size={16}/> Train Model</>}
-                </button>
-             </div>
-          </div>
-          <div className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 flex flex-col overflow-y-auto hidden-scrollbar">
-             {result ? (
-                  <div className="fade-in flex flex-col gap-6">
-                     <div className="flex justify-between items-center">
-                         <h2>Model Results ({result.type === 'lr' ? 'Regression' : 'K-Means'})</h2>
-                         <span className="text-xs bg-[var(--success)] text-black px-2 py-1 rounded font-bold uppercase tracking-wider">Ready</span>
-                     </div>
-                     
-                     {result.type === 'lr' && (
-                         <>
-                            <div className="grid grid-cols-3 gap-4">
-                               <div className="premium-card p-4 text-center shadow-lg border-t-2 border-t-[var(--primary)]">
-                                  <div className="text-3xl font-mono text-white mb-1">{result.testR2.toFixed(4)}</div>
-                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Test R² Score</div>
-                                  <div className="text-[9px] text-[var(--primary)] font-mono mt-1">Train R²: {result.trainR2.toFixed(4)}</div>
-                               </div>
-                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--success)]">
-                                  <div className="text-3xl font-mono text-[var(--success)] mb-1">{result.testMse.toFixed(2)}</div>
-                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Test MSE</div>
-                                  <div className="text-[9px] text-[var(--success)] font-mono mt-1">Train MSE: {result.trainMse.toFixed(2)}</div>
-                               </div>
-                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--warning)]">
-                                  <div className="text-3xl font-mono text-[var(--warning)] mb-1">{result.testMae.toFixed(2)}</div>
-                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Test MAE</div>
-                                  <div className="text-[9px] text-[var(--warning)] font-mono mt-1">Train MAE: {result.trainMae.toFixed(2)}</div>
-                               </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                               <div className="premium-card p-5 flex flex-col justify-center">
-                                  <h3 className="text-sm font-semibold mb-2">Linear Regression Formula</h3>
-                                  <div className="font-mono text-xl text-[var(--primary)] bg-[rgba(0,0,0,0.3)] p-4 rounded-lg border border-[var(--border)] text-center">
-                                     y = {result.m.toFixed(4)}x + {result.b.toFixed(4)}
-                                  </div>
-                                  <div className="text-[10px] text-muted mt-2">
-                                     Intercept (b): {result.b.toFixed(6)} <br/>
-                                     Slope (m): {result.m.toFixed(6)}
-                                  </div>
-                                </div>
-
-                               <div className="premium-card p-5">
-                                  <h3 className="text-sm font-semibold mb-3">Make a Prediction</h3>
-                                  <form onSubmit={handlePredict} className="flex gap-2">
-                                     <input 
-                                        type="number" 
-                                        step="any"
-                                        placeholder={`Enter ${result.xLabel}...`}
-                                        value={predictionInput}
-                                        onChange={e=>setPredictionInput(e.target.value)}
-                                        className="premium-input flex-1 text-sm h-9"
-                                     />
-                                     <button type="submit" className="btn-primary h-9 text-xs">Predict</button>
-                                  </form>
-                                  {predictionResult !== null && (
-                                     <div className="mt-3 p-3 bg-[var(--surface-light)] border border-[var(--border)] rounded-lg flex justify-between items-center">
-                                        <span className="text-xs text-muted">Predicted {result.yLabel}:</span>
-                                        <span className="font-mono text-sm font-bold text-[var(--success)]">{predictionResult.toFixed(4)}</span>
-                                     </div>
-                                  )}
-                               </div>
-                            </div>
-
-                            <div className="premium-card p-5">
-                               <h3 className="text-sm font-semibold mb-2">Residuals Plot (Residuals vs Fitted Values)</h3>
-                               <p className="text-[10px] text-muted mb-4">Ideally, points should be randomly scattered around the horizontal axis y=0.</p>
-                               <div className="h-64 w-full">
-                                  <ResponsiveContainer width="100%" height="100%">
-                                     <ScatterChart margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
-                                        <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                                        <XAxis type="number" dataKey="predicted" name="Fitted Values" tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} label={{ value: 'Fitted Values', position: 'bottom', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
-                                        <YAxis type="number" dataKey="residual" name="Residual" tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} label={{ value: 'Residual', angle: -90, position: 'left', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
-                                        <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} />
-                                        <Scatter name="Residuals" data={result.residuals} fill="#EF4444" />
-                                     </ScatterChart>
-                                  </ResponsiveContainer>
-                               </div>
-                            </div>
-                         </>
-                     )}
-                     
-                     {result.type === 'kmeans' && (
-                         <>
-                            <div className="grid grid-cols-3 gap-4">
-                               <div className="premium-card p-4 text-center shadow-lg border-t-2 border-t-[var(--primary)]">
-                                  <div className="text-3xl font-mono text-white mb-1">{result.k}</div>
-                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">K Clusters</div>
-                               </div>
-                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--success)]">
-                                  <div className="text-3xl font-mono text-[var(--success)] mb-1">{result.silhouette.toFixed(3)}</div>
-                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Silhouette Score</div>
-                               </div>
-                               <div className="premium-card p-4 text-center border-t-2 border-t-[var(--warning)]">
-                                  <div className="text-3xl font-mono text-[var(--warning)] mb-1">{result.inertia.toFixed(1)}</div>
-                                  <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">Total Inertia</div>
-                               </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                               <div className="premium-card p-5 flex flex-col">
-                                  <h3 className="text-sm font-semibold mb-2">Cluster Visualization</h3>
-                                  <p className="text-[10px] text-muted mb-4">
-                                     {result.isPCA 
-                                       ? "Multi-dimensional features projected to 2D using Principal Component Analysis (PCA)." 
-                                       : `Scatter plot of ${result.xLabel} vs ${result.yLabel} colored by cluster.`}
-                                  </p>
-                                  <div className="h-64 w-full">
-                                     <ResponsiveContainer width="100%" height="100%">
-                                        <ScatterChart margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
-                                           <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" />
-                                           <XAxis type="number" dataKey="x" name={result.xLabel} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} label={{ value: result.xLabel, position: 'bottom', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
-                                           <YAxis type="number" dataKey="y" name={result.yLabel} tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} label={{ value: result.yLabel, angle: -90, position: 'left', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
-                                           <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} />
-                                           <Scatter name="Datapoints" data={result.plotData}>
-                                              {result.plotData.map((entry: any, index: number) => (
-                                                <Cell key={`cell-${index}`} fill={CHART_COLORS[entry.cluster % CHART_COLORS.length]} />
-                                              ))}
-                                           </Scatter>
-                                        </ScatterChart>
-                                     </ResponsiveContainer>
-                                  </div>
-                               </div>
-
-                               <div className="premium-card p-5 flex flex-col">
-                                  <h3 className="text-sm font-semibold mb-2">Elbow Method (K vs Inertia)</h3>
-                                  <p className="text-[10px] text-muted mb-4">The "elbow" point is where the rate of decrease in inertia slows down significantly.</p>
-                                  <div className="h-64 w-full">
-                                     <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={result.elbowData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                                           <CartesianGrid strokeDasharray="4 4" stroke="#1E2D3D" vertical={false} />
-                                           <XAxis dataKey="k" tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={{stroke: '#1E2D3D'}} label={{ value: 'Clusters (K)', position: 'bottom', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
-                                           <YAxis tick={{fill: 'var(--text-muted)', fontSize: 10}} axisLine={false} label={{ value: 'Inertia', angle: -90, position: 'left', offset: 0, fill: 'var(--text-muted)', fontSize: 10 }} />
-                                           <RechartsTooltip />
-                                           <Line type="monotone" dataKey="inertia" stroke="#6366F1" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                                        </LineChart>
-                                     </ResponsiveContainer>
-                                  </div>
-                               </div>
-                            </div>
-                         </>
-                     )}
-                  </div>
-             ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-muted">
-                     <Network size={64} className="opacity-10 mb-4" />
-                     <div className="text-lg">Machine Learning Lab</div>
-                     <div className="text-sm opacity-60">Select configuration and train model to see evaluation</div>
-                  </div>
-             )}
-          </div>
-       </div>
-    );
-  };
-
-  const PipelineSection = () => {
-    const [showAddForm, setShowAddForm] = useState(false);
-    const [newStepType, setNewStepType] = useState<'filter' | 'drop_columns' | 'fill_nulls' | 'replace' | 'group_by' | 'sort'>('filter');
-
-    // Config form states:
-    const [filterCol, setFilterCol] = useState(columns[0]?.name || '');
-    const [filterOp, setFilterOp] = useState('==');
-    const [filterVal, setFilterVal] = useState('');
-
-    const [dropCols, setDropCols] = useState<string[]>([]);
-
-    const [fillCol, setFillCol] = useState(columns[0]?.name || '');
-    const [fillVal, setFillVal] = useState('');
-
-    const [repCol, setRepCol] = useState(columns[0]?.name || '');
-    const [repTarget, setRepTarget] = useState('');
-    const [repVal, setRepVal] = useState('');
-
-    const [sortCol, setSortCol] = useState(columns[0]?.name || '');
-    const [sortDir, setSortDir] = useState('asc');
-
-    const [groupByCol, setGroupByCol] = useState(columns.find(c => c.type === 'text')?.name || columns[0]?.name || '');
-    const [aggCol, setAggCol] = useState(columns.find(c => c.type === 'number')?.name || columns[0]?.name || '');
-    const [aggFn, setAggFn] = useState('sum');
-
-    // Preview table pagination
-    const [previewPage, setPreviewPage] = useState(0);
-    const rowsPerPage = 5;
-
-    // Reset column selectors when columns list changes
-    useEffect(() => {
-      if (columns.length > 0) {
-        setFilterCol(columns[0].name);
-        setFillCol(columns[0].name);
-        setRepCol(columns[0].name);
-        setSortCol(columns[0].name);
-        const textCol = columns.find(c => c.type === 'text')?.name || columns[0].name;
-        const numCol = columns.find(c => c.type === 'number')?.name || columns[0].name;
-        setGroupByCol(textCol);
-        setAggCol(numCol);
-      }
-    }, [columns]);
-
-    const handleAddStep = () => {
-      let config: any = {};
-      let name = '';
-
-      switch (newStepType) {
-        case 'filter':
-          if (!filterCol) {
-            addToast('Please select a column to filter', 'warning');
-            return;
-          }
-          config = { column: filterCol, operator: filterOp, value: filterVal };
-          name = `Filter: ${filterCol} ${filterOp} "${filterVal}"`;
-          break;
-        case 'drop_columns':
-          if (dropCols.length === 0) {
-            addToast('Please select at least one column to drop', 'warning');
-            return;
-          }
-          config = { selectedColumns: dropCols };
-          name = `Drop Columns: ${dropCols.join(', ')}`;
-          break;
-        case 'fill_nulls':
-          if (!fillCol) {
-            addToast('Please select a column', 'warning');
-            return;
-          }
-          config = { column: fillCol, fillValue: fillVal };
-          name = `Fill Nulls in ${fillCol} with "${fillVal}"`;
-          break;
-        case 'replace':
-          if (!repCol) {
-            addToast('Please select a column', 'warning');
-            return;
-          }
-          config = { column: repCol, target: repTarget, replacement: repVal };
-          name = `Replace in ${repCol}: "${repTarget}" → "${repVal}"`;
-          break;
-        case 'sort':
-          if (!sortCol) {
-            addToast('Please select a column to sort', 'warning');
-            return;
-          }
-          config = { column: sortCol, direction: sortDir };
-          name = `Sort by ${sortCol} (${sortDir.toUpperCase()})`;
-          break;
-        case 'group_by':
-          if (!groupByCol || !aggCol) {
-            addToast('Please select group and aggregation columns', 'warning');
-            return;
-          }
-          config = { groupColumn: groupByCol, aggColumn: aggCol, aggFunction: aggFn };
-          name = `Group By ${groupByCol}: ${aggFn.toUpperCase()}(${aggCol})`;
-          break;
-        default:
-          return;
-      }
-
-      const newStep = {
-        id: `step-${Date.now()}`,
-        type: newStepType,
-        name,
-        config
-      };
-
-      setPipelineSteps([...pipelineSteps, newStep]);
-      setShowAddForm(false);
-      // Reset config inputs
-      setFilterVal('');
-      setDropCols([]);
-      setFillVal('');
-      setRepTarget('');
-      setRepVal('');
-      addToast('Transformation step added successfully', 'success');
-    };
-
-    const handleDeleteStep = (id: string) => {
-      setPipelineSteps(pipelineSteps.filter(step => step.id !== id));
-      addToast('Transformation step removed', 'info');
-    };
-
-    const handleSavePipeline = () => {
-      if (!fileInfo?.name) return;
-      try {
-        localStorage.setItem(`datalens_pipeline_${fileInfo.name}`, JSON.stringify(pipelineSteps));
-        addToast('ETL Pipeline saved successfully to local storage!', 'success');
-      } catch (e) {
-        addToast('Failed to save pipeline', 'error');
-      }
-    };
-
-    const handleRunETL = () => {
-      if (data.length === 0) {
-        addToast('No source dataset available to run ETL', 'error');
-        return;
-      }
-      
-      setIsPipelineRunning(true);
-      setPipelineResult(null);
-
-      // Simulate a nice running progress
-      setTimeout(() => {
-        try {
-          let currentData = [...data];
-          let currentCols = [...columns];
-
-          for (const step of pipelineSteps) {
-            if (step.type === 'source') continue;
-
-            if (step.type === 'clean') {
-              // 1. Drop duplicates
-              const seen = new Set();
-              currentData = currentData.filter(row => {
-                const str = JSON.stringify(row);
-                if (seen.has(str)) return false;
-                seen.add(str);
-                return true;
-              });
-              // 2. Drop empty rows
-              currentData = currentData.filter(row => {
-                return Object.values(row).some(val => val !== null && val !== undefined && val !== '');
-              });
-            }
-
-            if (step.type === 'filter') {
-              const { column, operator, value } = step.config;
-              if (column) {
-                currentData = currentData.filter(row => {
-                  const cellVal = row[column];
-                  if (cellVal === undefined || cellVal === null) return false;
-                  
-                  const compareVal = isNaN(Number(value)) ? value : Number(value);
-                  const cellNum = isNaN(Number(cellVal)) ? String(cellVal).toLowerCase() : Number(cellVal);
-                  const compNum = typeof compareVal === 'string' ? compareVal.toLowerCase() : compareVal;
-                  
-                  switch (operator) {
-                    case '==': return String(cellVal).toLowerCase() === String(value).toLowerCase();
-                    case '!=': return String(cellVal).toLowerCase() !== String(value).toLowerCase();
-                    case '>': return Number(cellVal) > Number(value);
-                    case '<': return Number(cellVal) < Number(value);
-                    case '>=': return Number(cellVal) >= Number(value);
-                    case '<=': return Number(cellVal) <= Number(value);
-                    case 'contains': return String(cellVal).toLowerCase().includes(String(value).toLowerCase());
-                    case 'is_not_null': return cellVal !== null && cellVal !== undefined && cellVal !== '';
-                    default: return true;
-                  }
-                });
-              }
-            }
-
-            if (step.type === 'drop_columns') {
-              const { selectedColumns } = step.config;
-              if (selectedColumns && selectedColumns.length > 0) {
-                currentData = currentData.map(row => {
-                  const newRow = { ...row };
-                  selectedColumns.forEach((col: string) => {
-                    delete newRow[col];
-                  });
-                  return newRow;
-                });
-                currentCols = currentCols.filter(c => !selectedColumns.includes(c.name));
-              }
-            }
-
-            if (step.type === 'fill_nulls') {
-              const { column, fillValue } = step.config;
-              if (column) {
-                currentData = currentData.map(row => {
-                  if (row[column] === null || row[column] === undefined || row[column] === '') {
-                    return { ...row, [column]: isNaN(Number(fillValue)) ? fillValue : Number(fillValue) };
-                  }
-                  return row;
-                });
-              }
-            }
-
-            if (step.type === 'replace') {
-              const { column, target, replacement } = step.config;
-              if (column) {
-                currentData = currentData.map(row => {
-                  if (String(row[column] ?? '') === String(target)) {
-                    return { ...row, [column]: isNaN(Number(replacement)) ? replacement : Number(replacement) };
-                  }
-                  return row;
-                });
-              }
-            }
-
-            if (step.type === 'sort') {
-              const { column, direction } = step.config;
-              if (column) {
-                currentData.sort((a, b) => {
-                  const valA = a[column];
-                  const valB = b[column];
-                  if (valA === valB) return 0;
-                  if (valA === null || valA === undefined) return 1;
-                  if (valB === null || valB === undefined) return -1;
-                  
-                  const isNum = !isNaN(Number(valA)) && !isNaN(Number(valB));
-                  if (direction === 'asc') {
-                    return isNum ? Number(valA) - Number(valB) : String(valA).localeCompare(String(valB));
-                  } else {
-                    return isNum ? Number(valB) - Number(valA) : String(valB).localeCompare(String(valA));
-                  }
-                });
-              }
-            }
-
-            if (step.type === 'group_by') {
-              const { groupColumn, aggColumn, aggFunction } = step.config;
-              if (groupColumn && aggColumn && aggFunction) {
-                const groups: Record<string, number[]> = {};
-                currentData.forEach(row => {
-                  const key = String(row[groupColumn] ?? 'Unknown');
-                  const val = Number(row[aggColumn]);
-                  if (!isNaN(val)) {
-                    if (!groups[key]) groups[key] = [];
-                    groups[key].push(val);
-                  }
-                });
-                
-                currentData = Object.entries(groups).map(([key, vals]) => {
-                  let aggVal = 0;
-                  if (aggFunction === 'sum') aggVal = vals.reduce((s, v) => s + v, 0);
-                  else if (aggFunction === 'avg') aggVal = vals.reduce((s, v) => s + v, 0) / vals.length;
-                  else if (aggFunction === 'min') aggVal = Math.min(...vals);
-                  else if (aggFunction === 'max') aggVal = Math.max(...vals);
-                  else if (aggFunction === 'count') aggVal = vals.length;
-                  
-                  return {
-                    [groupColumn]: key,
-                    [`${aggColumn}_${aggFunction}`]: parseFloat(aggVal.toFixed(2))
-                  };
-                });
-                
-                currentCols = [
-                  { name: groupColumn, type: 'text' },
-                  { name: `${aggColumn}_${aggFunction}`, type: 'number' }
-                ];
-              }
-            }
-          }
-
-          setPipelineResult(currentData);
-          setPipelineColumns(currentCols);
-          setPreviewPage(0);
-          addToast(`ETL Execution Succeeded! Processed ${currentData.length.toLocaleString()} rows × ${currentCols.length} columns`, 'success');
-        } catch (e: any) {
-          console.error("ETL Runtime Error:", e);
-          addToast(`ETL Pipeline Failed: ${e.message || e}`, 'error');
-        } finally {
-          setIsPipelineRunning(false);
-        }
-      }, 1000);
-    };
-
-    const handleDownloadResult = () => {
-      if (!pipelineResult || pipelineResult.length === 0) return;
-      try {
-        const csv = Papa.unparse(pipelineResult);
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        const prefix = fileInfo?.name ? fileInfo.name.split('.')[0] : 'datalens';
-        link.setAttribute("download", `${prefix}_transformed.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        addToast("Transformed dataset downloaded successfully!", "success");
-      } catch (e) {
-        addToast("Export failed", "error");
-      }
-    };
-
-    const handleToggleDropCol = (colName: string) => {
-      if (dropCols.includes(colName)) {
-        setDropCols(dropCols.filter(c => c !== colName));
-      } else {
-        setDropCols([...dropCols, colName]);
-      }
-    };
-
-    return (
-      <div className="fade-in-up h-full flex flex-col gap-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2>ETL Pipeline Builder</h2>
-            <p className="text-muted mt-1">Visually design data transformation workflows, aggregate fields, and export clean results.</p>
-          </div>
-          {fileInfo?.name && (
-            <div className="badge badge-default flex items-center gap-1.5 font-mono text-xs py-1.5 px-3">
-              <Database size={12} className="text-[var(--primary)]" />
-              {fileInfo.name}
-            </div>
-          )}
-        </div>
-
-        {/* Dynamic Pipeline Steps flow */}
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 relative overflow-hidden">
-          <div className="absolute inset-0 pointer-events-none opacity-5" style={{ background: 'radial-gradient(circle at top right, var(--primary), transparent 40%)' }}></div>
-          <h3 className="text-base font-bold mb-4 flex items-center gap-2">
-            <Workflow size={18} className="text-[var(--primary)]" />
-            Workflow Architecture
-          </h3>
-          
-          <div className="w-full overflow-x-auto flex flex-row items-center gap-4 md:justify-start pb-2 scrollbar-thin">
-            {pipelineSteps.map((step, idx) => {
-              const isSource = step.type === 'source';
-              const isClean = step.type === 'clean';
-              
-              let stepBadgeColor = 'bg-[var(--primary)] text-white';
-              if (isSource) stepBadgeColor = 'bg-[var(--success)] text-black font-bold';
-              else if (isClean) stepBadgeColor = 'bg-[var(--warning)] text-black font-bold';
-
-              return (
-                <React.Fragment key={step.id}>
-                  <div className={`pipeline-step shrink-0 flex-shrink-0 border relative ${isSource ? 'active' : ''}`} style={{ minWidth: 220, maxWidth: 280 }}>
-                    <div className="flex justify-between items-center mb-3">
-                      <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded ${stepBadgeColor}`}>
-                        {step.type}
-                      </span>
-                      {!isSource && !isClean && (
-                        <button 
-                          className="text-muted hover:text-[var(--error)] transition-colors cursor-pointer"
-                          onClick={() => handleDeleteStep(step.id)}
-                          title="Delete transformation step"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </div>
-                    
-                    <div className="font-semibold text-sm text-white mb-1 truncate" title={step.name}>
-                      {step.name}
-                    </div>
-                    
-                    <div className="text-[11px] text-muted font-mono leading-relaxed truncate">
-                      {isSource ? `${data.length.toLocaleString()} rows × ${columns.length} cols` : 
-                       isClean ? 'Drop duplicates, drop empty rows' : 
-                       JSON.stringify(step.config)}
-                    </div>
-                  </div>
-                  
-                  {idx < pipelineSteps.length - 1 && (
-                    <div className="pipeline-connector shrink-0 flex-shrink-0 flex items-center justify-center">
-                      <ArrowRight size={14} className="text-muted" />
-                    </div>
-                  )}
-                </React.Fragment>
-              );
-            })}
-
-            {/* Add Step trigger card */}
-            <div className="pipeline-connector shrink-0 flex-shrink-0">
-              <ArrowRight size={14} className="text-muted" />
-            </div>
-
-            <button 
-              onClick={() => setShowAddForm(!showAddForm)}
-              className="pipeline-step shrink-0 flex-shrink-0 border border-dashed border-[var(--border)] bg-transparent hover:bg-[rgba(255,255,255,0.02)] flex flex-col items-center justify-center cursor-pointer min-h-[96px] text-muted hover:text-white transition-all duration-200"
-              style={{ minWidth: 200 }}
-            >
-              <Plus size={20} className="mb-1 text-[var(--primary)]" />
-              <span className="text-xs font-semibold">Add Transformation</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Configure Transformation Step Form */}
-        {showAddForm && (
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 fade-in shadow-2xl">
-            <h3 className="text-base font-bold mb-4 flex items-center gap-2">
-              <Zap size={18} className="text-[var(--warning)]" />
-              Configure Transformation Step
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Step Operation</label>
-                <select 
-                  value={newStepType}
-                  onChange={(e) => setNewStepType(e.target.value as any)}
-                  className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-[var(--primary)]"
-                >
-                  <option value="filter">Filter Rows</option>
-                  <option value="drop_columns">Drop Columns</option>
-                  <option value="fill_nulls">Fill Null / Missing Values</option>
-                  <option value="replace">Replace Value</option>
-                  <option value="sort">Sort Data</option>
-                  <option value="group_by">Group By & Aggregate</option>
-                </select>
-              </div>
-
-              <div className="md:col-span-3 bg-[rgba(255,255,255,0.02)] p-4 rounded-lg border border-[var(--border)]">
-                {newStepType === 'filter' && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Column</label>
-                      <select 
-                        value={filterCol}
-                        onChange={(e) => setFilterCol(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Operator</label>
-                      <select 
-                        value={filterOp}
-                        onChange={(e) => setFilterOp(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        <option value="==">Equals (==)</option>
-                        <option value="!=">Does Not Equal (!=)</option>
-                        <option value=">">Greater Than (&gt;)</option>
-                        <option value="<">Less Than (&lt;)</option>
-                        <option value=">=">Greater Than or Equal (&gt;=)</option>
-                        <option value="<=">Less Than or Equal (&lt;=)</option>
-                        <option value="contains">Contains (text search)</option>
-                        <option value="is_not_null">Is Not Null / Empty</option>
-                      </select>
-                    </div>
-                    {filterOp !== 'is_not_null' && (
-                      <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Value</label>
-                        <input 
-                          type="text"
-                          value={filterVal}
-                          onChange={(e) => setFilterVal(e.target.value)}
-                          placeholder="e.g. 50 or Premium"
-                          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {newStepType === 'drop_columns' && (
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Select Columns to Drop</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[120px] overflow-y-auto pr-2 scrollbar-thin">
-                      {columns.map(c => (
-                        <label key={c.name} className="flex items-center gap-2 p-1.5 rounded bg-[var(--bg)] border border-[var(--border)] text-xs text-muted cursor-pointer hover:border-[var(--primary)] hover:text-white transition-colors">
-                          <input 
-                            type="checkbox"
-                            checked={dropCols.includes(c.name)}
-                            onChange={() => handleToggleDropCol(c.name)}
-                          />
-                          <span className="truncate">{c.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {newStepType === 'fill_nulls' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Column</label>
-                      <select 
-                        value={fillCol}
-                        onChange={(e) => setFillCol(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Replacement Value</label>
-                      <input 
-                        type="text"
-                        value={fillVal}
-                        onChange={(e) => setFillVal(e.target.value)}
-                        placeholder="e.g. 0 or Unknown"
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {newStepType === 'replace' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Column</label>
-                      <select 
-                        value={repCol}
-                        onChange={(e) => setRepCol(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Value to Find</label>
-                      <input 
-                        type="text"
-                        value={repTarget}
-                        onChange={(e) => setRepTarget(e.target.value)}
-                        placeholder="e.g. Basic"
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Replace with</label>
-                      <input 
-                        type="text"
-                        value={repVal}
-                        onChange={(e) => setRepVal(e.target.value)}
-                        placeholder="e.g. Standard"
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {newStepType === 'sort' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Sort Column</label>
-                      <select 
-                        value={sortCol}
-                        onChange={(e) => setSortCol(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Direction</label>
-                      <select 
-                        value={sortDir}
-                        onChange={(e) => setSortDir(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        <option value="asc">Ascending (A → Z, Low → High)</option>
-                        <option value="desc">Descending (Z → A, High → Low)</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {newStepType === 'group_by' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Group Column (Text)</label>
-                      <select 
-                        value={groupByCol}
-                        onChange={(e) => setGroupByCol(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Aggregation Column (Number)</label>
-                      <select 
-                        value={aggCol}
-                        onChange={(e) => setAggCol(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-2">Agg Function</label>
-                      <select 
-                        value={aggFn}
-                        onChange={(e) => setAggFn(e.target.value)}
-                        className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg p-2 text-sm text-white"
-                      >
-                        <option value="sum">SUM</option>
-                        <option value="avg">AVERAGE</option>
-                        <option value="min">MINIMUM</option>
-                        <option value="max">MAXIMUM</option>
-                        <option value="count">COUNT Rows</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button 
-                className="btn-secondary text-xs cursor-pointer"
-                onClick={() => setShowAddForm(false)}
-              >
-                Cancel
-              </button>
-              <button 
-                className="btn-primary text-xs cursor-pointer flex items-center gap-1.5"
-                onClick={handleAddStep}
-              >
-                <Plus size={14} /> Add to Pipeline
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Global Pipeline Action trigger footer */}
-        <div className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-xl flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="text-sm text-muted text-center sm:text-left">
-            Pipeline contains <span className="text-white font-semibold">{pipelineSteps.length} steps</span>. Setup transformations, run, and export.
-          </div>
-          <div className="flex gap-3 w-full sm:w-auto">
-            <button 
-              className="btn-secondary flex-1 sm:flex-initial flex items-center justify-center gap-2 cursor-pointer" 
-              onClick={handleSavePipeline}
-              title="Save current steps sequence to local storage"
-            >
-              <Save size={16}/> Save Pipeline
-            </button>
-            <button 
-              className="btn-primary flex-1 sm:flex-initial flex items-center justify-center gap-2 cursor-pointer"
-              disabled={isPipelineRunning}
-              onClick={handleRunETL}
-            >
-              {isPipelineRunning ? (
-                <>
-                  <RefreshCcw className="animate-spin" size={16} /> Running ETL...
-                </>
-              ) : (
-                <>
-                  <Play size={16}/> Run ETL Pipeline
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* ETL Transformed Preview panel */}
-        {pipelineResult && (
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 fade-in flex flex-col gap-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h3 className="text-base font-bold flex items-center gap-2 text-[var(--success)]">
-                  <CheckCircle size={18} />
-                  ETL Run Result Details
-                </h3>
-                <p className="text-xs text-muted font-mono mt-1">
-                  Generated {pipelineResult.length.toLocaleString()} rows × {pipelineColumns.length} columns
-                </p>
-              </div>
-              <button 
-                className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center cursor-pointer"
-                onClick={handleDownloadResult}
-              >
-                <Download size={16} /> Export Transformed CSV
-              </button>
-            </div>
-
-            {/* Beautiful Preview Table */}
-            {pipelineResult.length > 0 ? (
-              <div className="flex flex-col gap-3">
-                <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--bg)]">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-[var(--border)] bg-[rgba(255,255,255,0.02)]">
-                        {pipelineColumns.map((col) => (
-                          <th key={col.name} className="p-3 font-semibold uppercase tracking-wider text-muted whitespace-nowrap">
-                            {col.name}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pipelineResult.slice(previewPage * rowsPerPage, (previewPage + 1) * rowsPerPage).map((row, rowIdx) => (
-                        <tr key={rowIdx} className="border-b border-[var(--border)] hover:bg-[rgba(255,255,255,0.01)] transition-colors">
-                          {pipelineColumns.map((col) => (
-                            <td key={col.name} className="p-3 text-[var(--text-primary)] whitespace-nowrap">
-                              {row[col.name] != null ? String(row[col.name]) : <span className="text-muted italic">null</span>}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Micro pagination controls */}
-                {pipelineResult.length > rowsPerPage && (
-                  <div className="flex justify-between items-center text-xs text-muted px-1 mt-1">
-                    <div>
-                      Showing {previewPage * rowsPerPage + 1} to {Math.min((previewPage + 1) * rowsPerPage, pipelineResult.length)} of {pipelineResult.length.toLocaleString()} rows
-                    </div>
-                    <div className="flex gap-2">
-                      <button 
-                        disabled={previewPage === 0}
-                        onClick={() => setPreviewPage(previewPage - 1)}
-                        className="btn-secondary py-1 px-3 disabled:opacity-50 text-[11px] cursor-pointer"
-                      >
-                        Prev
-                      </button>
-                      <button 
-                        disabled={(previewPage + 1) * rowsPerPage >= pipelineResult.length}
-                        onClick={() => setPreviewPage(previewPage + 1)}
-                        className="btn-secondary py-1 px-3 disabled:opacity-50 text-[11px] cursor-pointer"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="p-8 text-center text-muted border border-dashed border-[var(--border)] rounded-xl">
-                The ETL transformations resulted in an empty dataset. Try loosening your filter criteria.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
+};
 
   // --- DASHBOARD BUILDER HELPERS & EFFECTS ---
 
@@ -5449,7 +4239,7 @@ const ChartsSection = () => {
     if (!data || data.length === 0) {
       return (
         <div className="fade-in-up h-full flex flex-col items-center justify-center p-8 text-center max-w-xl mx-auto my-12">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-500/20">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] flex items-center justify-center text-white mb-6 shadow-lg shadow-blue-500/20">
             <LayoutDashboard size={32} />
           </div>
           <h2 className="text-2xl font-bold mb-2">No Dataset Loaded</h2>
@@ -5478,21 +4268,22 @@ const ChartsSection = () => {
           
           <div className="flex flex-wrap gap-2 items-center">
             <div className="relative">
-              <select 
-                className="premium-input premium-select min-w-[180px] bg-[var(--surface)] text-sm"
+              <CustomSelect 
+                size="sm"
+                className="min-w-[180px]"
                 value=""
-                onChange={(e) => {
-                  if (e.target.value === 'sales') loadSalesTemplate();
-                  else if (e.target.value === 'users') loadUserAnalyticsTemplate();
-                  else if (e.target.value === 'finance') loadFinancialTemplate();
-                  e.target.value = '';
+                onChange={(val) => {
+                  if (val === 'sales') loadSalesTemplate();
+                  else if (val === 'users') loadUserAnalyticsTemplate();
+                  else if (val === 'finance') loadFinancialTemplate();
                 }}
-              >
-                <option value="" disabled>Load Template...</option>
-                <option value="sales">Sales Overview</option>
-                <option value="users">User Analytics</option>
-                <option value="finance">Financial Summary</option>
-              </select>
+                options={[
+                  { value: "", label: "Load Template..." },
+                  { value: "sales", label: "Sales Overview" },
+                  { value: "users", label: "User Analytics" },
+                  { value: "finance", label: "Financial Summary" }
+                ]}
+              />
             </div>
 
             {widgets.length > 0 && (
@@ -5502,7 +4293,7 @@ const ChartsSection = () => {
             )}
 
             <button 
-              className={`btn-secondary ${!isEditMode ? 'bg-[rgba(99,102,241,0.08)] text-[var(--primary)] border-[var(--primary)]' : ''}`}
+              className={`btn-secondary ${!isEditMode ? 'bg-[rgba(34, 197, 94, 0.08)] text-[var(--primary)] border-[var(--primary)]' : ''}`}
               onClick={() => setIsEditMode(!isEditMode)}
             >
               {isEditMode ? <CheckCircle size={16}/> : <Wand2 size={16}/>}
@@ -5530,8 +4321,8 @@ const ChartsSection = () => {
               cols={12}
               rowHeight={100}
               margin={[16, 16]}
-              isDraggable={isEditMode}
-              isResizable={isEditMode}
+              isDraggable={isEditMode && !isMobile}
+              isResizable={isEditMode && !isMobile}
               draggableHandle=".widget-drag-handle"
               useCSSTransforms={true}
             >
@@ -5597,19 +4388,56 @@ const ChartsSection = () => {
   }
 
   if (!currentUser) {
-    return <BrandedAuthPage onLogin={(user: any) => setCurrentUser(user)} />;
+    if (showAuthModal) {
+      return (
+        <OnboardingFlow
+          initialMode={showAuthModal === 'register' ? 'register' : 'login'}
+          onAuthSubmit={handleAuthSubmit}
+          onSocialLogin={handleSocialAuthSubmit}
+          onComplete={(user, data) => {
+            setCurrentUser(user);
+            setOnboardingData(data);
+            setShowAuthModal(null);
+          }}
+          onCancel={() => setShowAuthModal(null)}
+        />
+      );
+    }
+    return (
+      <LandingPage
+        onStartAuth={(mode) => setShowAuthModal(mode)}
+        appName={appName}
+        appTagline={appTagline}
+      />
+    );
   }
 
   return (
-    <div className="app-container" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove}>
+    <div className={`app-container ${desktopSidebarCollapsed ? 'sidebar-collapsed' : ''}`} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove}>
+      {/* Mobile Sidebar Backdrop */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs md:hidden"
+          style={{ zIndex: 9990 }}
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <div className="sidebar-logo">
+      <div className={`sidebar ${sidebarOpen ? 'open' : ''} ${desktopSidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-logo flex items-center justify-between w-full">
           <DynamicLogo />
+          <button 
+            className="btn-icon border-none bg-transparent hover:bg-[rgba(0,0,0,0.05)] p-1 min-h-[32px] min-w-[32px] rounded-lg hidden md:flex items-center justify-center cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            onClick={() => setDesktopSidebarCollapsed(true)}
+            title="Collapse sidebar"
+          >
+            <ChevronLeft size={18} />
+          </button>
         </div>
         
         <div className="nav-list mt-4">
-          <div className={`nav-item ${activeTab === 'upload' ? 'active' : ''}`} onClick={() => setActiveTab('upload')}>
+          <div className={`nav-item ${activeTab === 'upload' ? 'active' : ''}`} onClick={() => selectTab('upload')}>
             <Upload size={18} /> Upload Data
           </div>
           
@@ -5618,11 +4446,11 @@ const ChartsSection = () => {
               <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                 Preparation
               </div>
-              <div className={`nav-item ${activeTab === 'preview' ? 'active' : ''}`} onClick={() => setActiveTab('preview')}>
+              <div className={`nav-item ${activeTab === 'preview' ? 'active' : ''}`} onClick={() => selectTab('preview')}>
                 <FileSpreadsheet size={18} /> Data Preview
               </div>
               {hasFeature('dataCleaning') && (
-                <div className={`nav-item ${activeTab === 'cleaning' ? 'active' : ''}`} onClick={() => setActiveTab('cleaning')}>
+                <div className={`nav-item ${activeTab === 'cleaning' ? 'active' : ''}`} onClick={() => selectTab('cleaning')}>
                   <Wand2 size={18} /> Data Cleaning
                 </div>
               )}
@@ -5630,54 +4458,34 @@ const ChartsSection = () => {
               <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                 Analysis
               </div>
-              {hasFeature('pivotTables') && (
-                <div className={`nav-item ${activeTab === 'pivot' ? 'active' : ''}`} onClick={() => setActiveTab('pivot')}>
-                  <Activity size={18} /> Pivot Table
-                </div>
-              )}
-              <div className={`nav-item ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => setActiveTab('stats')}>
+              <div className={`nav-item ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => selectTab('stats')}>
                 <Hash size={18} /> Statistics
               </div>
-              <div className={`nav-item ${activeTab === 'charts' ? 'active' : ''}`} onClick={() => setActiveTab('charts')}>
+              <div className={`nav-item ${activeTab === 'charts' ? 'active' : ''}`} onClick={() => selectTab('charts')}>
                 <PieChartIcon size={18} /> Visualizations
               </div>
-              <div className={`nav-item ${activeTab === 'eda' ? 'active' : ''}`} onClick={() => setActiveTab('eda')}>
+              <div className={`nav-item ${activeTab === 'eda' ? 'active' : ''}`} onClick={() => selectTab('eda')}>
                 <FileOutput size={18} /> EDA Report
               </div>
               {hasFeature('chat') && (
-                <div className={`nav-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+                <div className={`nav-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => selectTab('chat')}>
                   <MessageSquare size={18} /> AI Chat
                 </div>
               )}
 
-              {(hasFeature('autoAnalyst') || hasFeature('sqlEngine') || hasFeature('mlLab') || hasFeature('dashboard') || hasFeature('pipeline')) && (
+              {(hasFeature('autoAnalyst') || hasFeature('dashboard')) && (
                 <>
                   <div className="px-4 py-2 mt-4 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                     Advanced
                   </div>
                   {hasFeature('autoAnalyst') && (
-                    <div className={`nav-item ${activeTab === 'auto-analyst' ? 'active' : ''}`} onClick={() => setActiveTab('auto-analyst')}>
+                    <div className={`nav-item ${activeTab === 'auto-analyst' ? 'active' : ''}`} onClick={() => selectTab('auto-analyst')}>
                       <Wand2 size={18} /> Auto-Analyst
                     </div>
                   )}
-                  {hasFeature('sqlEngine') && (
-                    <div className={`nav-item ${activeTab === 'sql' ? 'active' : ''}`} onClick={() => setActiveTab('sql')}>
-                      <Terminal size={18} /> SQL Engine
-                    </div>
-                  )}
-                  {hasFeature('mlLab') && (
-                    <div className={`nav-item ${activeTab === 'ml' ? 'active' : ''}`} onClick={() => setActiveTab('ml')}>
-                      <Network size={18} /> ML Lab
-                    </div>
-                  )}
                   {hasFeature('dashboard') && (
-                    <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+                    <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => selectTab('dashboard')}>
                       <LayoutDashboard size={18} /> Dashboard
-                    </div>
-                  )}
-                  {hasFeature('pipeline') && (
-                    <div className={`nav-item ${activeTab === 'pipeline' ? 'active' : ''}`} onClick={() => setActiveTab('pipeline')}>
-                      <Workflow size={18} /> ETL Pipeline
                     </div>
                   )}
                 </>
@@ -5686,13 +4494,13 @@ const ChartsSection = () => {
           )}
 
           <div className="px-4 py-2 mt-auto border-t border-[var(--border)] pt-4 text-xs text-muted flex flex-col gap-2.5">
-            <div className="flex items-center gap-2 bg-[rgba(255,255,255,0.01)] border border-[var(--border)] p-2 rounded-lg">
+            <div className="flex items-center gap-2 bg-[var(--surface-raised)] border border-[var(--border)] p-2 rounded-lg">
               <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] text-white flex items-center justify-center font-bold text-xs uppercase shadow-sm shrink-0">
                 {currentUser?.name?.slice(0, 2)}
               </div>
               <div className="flex-1 truncate">
-                <div className="font-semibold text-white truncate">{currentUser?.name}</div>
-                <div className="text-[10px] opacity-75 truncate">{currentUser?.email}</div>
+                <div className="font-semibold text-[var(--text-primary)] truncate">{currentUser?.name}</div>
+                <div className="text-[10px] text-[var(--text-muted)] truncate">{currentUser?.email}</div>
               </div>
             </div>
             <button 
@@ -5725,15 +4533,15 @@ const ChartsSection = () => {
         </div>
 
         {fileInfo && (
-          <div className="mt-auto p-4 m-4 rounded-xl glass flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-[#1E2D3D] flex items-center justify-center font-bold text-sm text-[#6366F1]">
+          <div className="mt-auto p-4 m-4 rounded-xl bg-gradient-to-br from-blue-50 to-purple-50 border border-[var(--border)] flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--primary)] to-[var(--accent)] flex items-center justify-center font-bold text-sm text-white shadow-sm">
               <Database size={16} />
             </div>
             <div className="min-w-0">
-              <div className="font-bold text-sm truncate" title={fileInfo.name}>{fileInfo.name}</div>
-              <div className="text-[10px] text-[#475569] uppercase flex justify-between gap-2 mt-0.5">
+              <div className="font-bold text-sm text-[var(--text-primary)] truncate" title={fileInfo.name}>{fileInfo.name}</div>
+              <div className="text-[10px] text-[var(--text-muted)] uppercase flex justify-between gap-2 mt-0.5">
                 <span>{formatBytes(fileInfo.size)}</span>
-                <span className="font-mono text-[#6366F1]">{data.length} rows</span>
+                <span className="font-mono text-[var(--primary)]">{data.length} rows</span>
               </div>
             </div>
           </div>
@@ -5745,11 +4553,21 @@ const ChartsSection = () => {
         {/* Top Navbar */}
         <div className="top-navbar">
           <div className="flex items-center gap-4">
-            <button className="md:hidden btn-icon" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            <button 
+              className="btn-icon" 
+              onClick={() => {
+                if (window.innerWidth <= 768) {
+                  setSidebarOpen(!sidebarOpen);
+                } else {
+                  setDesktopSidebarCollapsed(!desktopSidebarCollapsed);
+                }
+              }}
+              title={desktopSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
               <Menu size={20} />
             </button>
             <div className="breadcrumb">
-               Workspace <ChevronRight size={14} /> 
+               <span className="hidden sm:inline-flex items-center gap-1.5">Workspace <ChevronRight size={14} /></span>
                <span className="breadcrumb-active capitalize">
                  {activeTab.replace('-', ' ')}
                </span>
@@ -5759,16 +4577,16 @@ const ChartsSection = () => {
           {data.length > 0 && (
             <div className="flex items-center gap-2">
               <button className="btn-secondary whitespace-nowrap text-xs px-3" onClick={handleExportCSV}>
-                <ArrowDownRight size={14} /> CSV
+                <ArrowDownRight size={14} /> <span className="hidden sm:inline">CSV</span>
               </button>
               <button className="btn-secondary whitespace-nowrap text-xs px-3" onClick={handleExportExcel}>
-                <ArrowDownRight size={14} /> Excel
+                <ArrowDownRight size={14} /> <span className="hidden sm:inline">Excel</span>
               </button>
               <button className={`btn-secondary whitespace-nowrap text-xs px-3 ${historyOpen ? 'bg-[var(--primary)] text-white border-[var(--primary)]' : ''}`} onClick={() => setHistoryOpen(!historyOpen)}>
-                <RotateCcw size={14} /> History
+                <RotateCcw size={14} /> <span className="hidden sm:inline">History</span>
               </button>
-              <button className="btn-primary whitespace-nowrap text-xs px-3 ml-2" onClick={() => setActiveTab('chat')}>
-                <Sparkles size={14} /> Ask AI
+              <button className="btn-primary whitespace-nowrap text-xs px-3 ml-2" onClick={() => selectTab('chat')}>
+                <Sparkles size={14} /> <span className="hidden sm:inline">Ask AI</span>
               </button>
             </div>
           )}
@@ -5776,49 +4594,29 @@ const ChartsSection = () => {
 
         {/* Content Area */}
         <div className="content-area hidden-scrollbar">
-          {activeTab === 'upload' && <ErrorBoundary sectionName="Upload"><UploadSection /></ErrorBoundary>}
-          {activeTab === 'preview' && <ErrorBoundary sectionName="Preview"><PreviewSection /></ErrorBoundary>}
-          {activeTab === 'stats' && <ErrorBoundary sectionName="Stats"><StatsSection /></ErrorBoundary>}
-          {activeTab === 'charts' && <ErrorBoundary sectionName="Charts"><ChartsSection /></ErrorBoundary>}
+          {activeTab === 'upload' && <ErrorBoundary sectionName="Upload">{UploadSection()}</ErrorBoundary>}
+          {activeTab === 'preview' && <ErrorBoundary sectionName="Preview">{PreviewSection()}</ErrorBoundary>}
+          {activeTab === 'stats' && <ErrorBoundary sectionName="Stats">{StatsSection()}</ErrorBoundary>}
+          {activeTab === 'charts' && <ErrorBoundary sectionName="Charts">{ChartsSection()}</ErrorBoundary>}
           {activeTab === 'cleaning' && (
             <FeatureGate feature="dataCleaning">
-              <ErrorBoundary sectionName="Cleaning"><CleaningSection /></ErrorBoundary>
+              <ErrorBoundary sectionName="Cleaning">{CleaningSection()}</ErrorBoundary>
             </FeatureGate>
           )}
-          {activeTab === 'pivot' && (
-            <FeatureGate feature="pivotTables">
-              <ErrorBoundary sectionName="Pivot"><PivotSection /></ErrorBoundary>
-            </FeatureGate>
-          )}
-          {activeTab === 'eda' && <ErrorBoundary sectionName="EDA"><EdaSection /></ErrorBoundary>}
+          {activeTab === 'eda' && <ErrorBoundary sectionName="EDA">{EdaSection()}</ErrorBoundary>}
           {activeTab === 'chat' && (
             <FeatureGate feature="chat">
-              <ErrorBoundary sectionName="Chat"><ChatSection /></ErrorBoundary>
-            </FeatureGate>
-          )}
-          {activeTab === 'sql' && (
-            <FeatureGate feature="sqlEngine">
-              <ErrorBoundary sectionName="SQL"><SqlSection /></ErrorBoundary>
-            </FeatureGate>
-          )}
-          {activeTab === 'ml' && (
-            <FeatureGate feature="mlLab">
-              <ErrorBoundary sectionName="ML Lab"><MLLabSection /></ErrorBoundary>
-            </FeatureGate>
-          )}
-          {activeTab === 'pipeline' && (
-            <FeatureGate feature="pipeline">
-              <ErrorBoundary sectionName="Pipeline"><PipelineSection /></ErrorBoundary>
+              <ErrorBoundary sectionName="Chat">{ChatSection()}</ErrorBoundary>
             </FeatureGate>
           )}
           {activeTab === 'dashboard' && (
             <FeatureGate feature="dashboard">
-              <ErrorBoundary sectionName="Dashboard"><DashboardSection /></ErrorBoundary>
+              <ErrorBoundary sectionName="Dashboard">{DashboardSection()}</ErrorBoundary>
             </FeatureGate>
           )}
           {activeTab === 'auto-analyst' && (
             <FeatureGate feature="autoAnalyst">
-              <ErrorBoundary sectionName="Auto-Analyst"><AutoAnalystSection /></ErrorBoundary>
+              <ErrorBoundary sectionName="Auto-Analyst">{AutoAnalystSection()}</ErrorBoundary>
             </FeatureGate>
           )}
         </div>
@@ -5891,7 +4689,7 @@ const ChartsSection = () => {
                       type="button"
                       className={`flex flex-col items-center justify-center p-3 rounded-lg border text-[10px] font-semibold gap-1.5 transition-all ${
                         widgetForm.type === t.id
-                          ? 'border-[var(--primary)] bg-[rgba(99,102,241,0.08)] text-[var(--primary)]'
+                          ? 'border-[var(--primary)] bg-[rgba(34, 197, 94, 0.08)] text-[var(--primary)]'
                           : 'border-[var(--border)] bg-[var(--bg)] text-muted hover:text-white hover:border-gray-600'
                       }`}
                       onClick={() => {
@@ -5928,36 +4726,30 @@ const ChartsSection = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="input-group">
                     <label className="input-label" htmlFor="kpi-column">Aggregate Column</label>
-                    <select
-                      id="kpi-column"
-                      className="premium-input premium-select"
+                    <CustomSelect
                       value={widgetForm.column}
-                      onChange={(e) => setWidgetForm(prev => ({ ...prev, column: e.target.value }))}
-                      required={widgetForm.operation !== 'count'}
+                      onChange={(val) => setWidgetForm(prev => ({ ...prev, column: val }))}
                       disabled={widgetForm.operation === 'count'}
-                    >
-                      <option value="" disabled>Select column...</option>
-                      {columns.map(c => (
-                        <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: "", label: "Select column..." },
+                        ...columns.map(c => ({ value: c.name, label: `${c.name} (${c.type})` }))
+                      ]}
+                    />
                   </div>
                   <div className="input-group">
                     <label className="input-label" htmlFor="kpi-op">Operation</label>
-                    <select
-                      id="kpi-op"
-                      className="premium-input premium-select"
+                    <CustomSelect
                       value={widgetForm.operation}
-                      onChange={(e) => setWidgetForm(prev => ({ ...prev, operation: e.target.value }))}
-                      required
-                    >
-                      <option value="sum">Sum (Numeric)</option>
-                      <option value="avg">Average (Numeric)</option>
-                      <option value="min">Minimum (Numeric)</option>
-                      <option value="max">Maximum (Numeric)</option>
-                      <option value="count">Count (All Rows)</option>
-                      <option value="unique">Unique Count (Any)</option>
-                    </select>
+                      onChange={(val) => setWidgetForm(prev => ({ ...prev, operation: val }))}
+                      options={[
+                        { value: "sum", label: "Sum (Numeric)" },
+                        { value: "avg", label: "Average (Numeric)" },
+                        { value: "min", label: "Minimum (Numeric)" },
+                        { value: "max", label: "Maximum (Numeric)" },
+                        { value: "count", label: "Count (All Rows)" },
+                        { value: "unique", label: "Unique Count (Any)" }
+                      ]}
+                    />
                   </div>
                 </div>
               )}
@@ -5967,51 +4759,41 @@ const ChartsSection = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="input-group">
                       <label className="input-label" htmlFor="chart-x">X-Axis (Dimension)</label>
-                      <select
-                        id="chart-x"
-                        className="premium-input premium-select"
+                      <CustomSelect
                         value={widgetForm.xAxisColumn}
-                        onChange={(e) => setWidgetForm(prev => ({ ...prev, xAxisColumn: e.target.value }))}
-                        required
-                      >
-                        <option value="" disabled>Select x-axis...</option>
-                        {columns.map(c => (
-                          <option key={c.name} value={c.name}>{c.name} ({c.type})</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setWidgetForm(prev => ({ ...prev, xAxisColumn: val }))}
+                        options={[
+                          { value: "", label: "Select x-axis..." },
+                          ...columns.map(c => ({ value: c.name, label: `${c.name} (${c.type})` }))
+                        ]}
+                      />
                     </div>
                     <div className="input-group">
                       <label className="input-label" htmlFor="chart-y">Y-Axis (Value)</label>
-                      <select
-                        id="chart-y"
-                        className="premium-input premium-select"
+                      <CustomSelect
                         value={widgetForm.yAxisColumn}
-                        onChange={(e) => setWidgetForm(prev => ({ ...prev, yAxisColumn: e.target.value }))}
-                        required={widgetForm.operation !== 'count'}
+                        onChange={(val) => setWidgetForm(prev => ({ ...prev, yAxisColumn: val }))}
                         disabled={widgetForm.operation === 'count'}
-                      >
-                        <option value="" disabled>Select y-axis...</option>
-                        {columns.filter(c => c.type === 'number').map(c => (
-                          <option key={c.name} value={c.name}>{c.name}</option>
-                        ))}
-                      </select>
+                        options={[
+                          { value: "", label: "Select y-axis..." },
+                          ...columns.filter(c => c.type === 'number').map(c => ({ value: c.name, label: c.name }))
+                        ]}
+                      />
                     </div>
                   </div>
                   <div className="input-group">
                     <label className="input-label" htmlFor="chart-op">Calculation</label>
-                    <select
-                      id="chart-op"
-                      className="premium-input premium-select"
+                    <CustomSelect
                       value={widgetForm.operation}
-                      onChange={(e) => setWidgetForm(prev => ({ ...prev, operation: e.target.value }))}
-                      required
-                    >
-                      <option value="sum">Sum of Y Values</option>
-                      <option value="avg">Average of Y Values</option>
-                      <option value="min">Minimum of Y Values</option>
-                      <option value="max">Maximum of Y Values</option>
-                      <option value="count">Count of Records</option>
-                    </select>
+                      onChange={(val) => setWidgetForm(prev => ({ ...prev, operation: val }))}
+                      options={[
+                        { value: "sum", label: "Sum of Y Values" },
+                        { value: "avg", label: "Average of Y Values" },
+                        { value: "min", label: "Minimum of Y Values" },
+                        { value: "max", label: "Maximum of Y Values" },
+                        { value: "count", label: "Count of Records" }
+                      ]}
+                    />
                   </div>
                 </div>
               )}
@@ -6103,7 +4885,7 @@ const ChartsSection = () => {
       {/* Toasts */}
       <div className="toast-container z-50">
         {showRestoreSession && (
-          <div className="toast info" style={{ flexWrap: 'wrap', alignItems: 'flex-start', borderLeft: '4px solid var(--primary)'}}>
+          <div className="toast info" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <Activity className="text-[var(--primary)] shrink-0" size={20} />
             <div className="flex-1 flex flex-col gap-2">
               <span className="text-sm font-bold pt-0.5 pb-1">Restore previous session?</span>
@@ -6138,7 +4920,7 @@ const ChartsSection = () => {
           </div>
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
              <div 
-                className={`p-3 rounded-lg border cursor-pointer transition-colors ${historyIndex === -1 ? 'border-[var(--primary)] bg-[rgba(99,102,241,0.1)]' : 'border-[var(--border)] hover:bg-[rgba(255,255,255,0.02)]'}`}
+                className={`p-3 rounded-lg border cursor-pointer transition-colors ${historyIndex === -1 ? 'border-[var(--primary)] bg-[rgba(34, 197, 94, 0.1)]' : 'border-[var(--border)] hover:bg-[rgba(255,255,255,0.02)]'}`}
                 onClick={() => jumpToState(-1)}
              >
                 <div className="font-semibold text-sm">Initial State</div>
@@ -6147,7 +4929,7 @@ const ChartsSection = () => {
              {history.map((op, i) => (
                 <div 
                    key={op.id}
-                   className={`p-3 rounded-lg border cursor-pointer transition-colors relative ${i === historyIndex ? 'border-[var(--primary)] bg-[rgba(99,102,241,0.1)]' : 'border-[var(--border)] hover:bg-[rgba(255,255,255,0.02)] filter ' + (i > historyIndex ? 'opacity-50 grayscale' : '')}`}
+                   className={`p-3 rounded-lg border cursor-pointer transition-colors relative ${i === historyIndex ? 'border-[var(--primary)] bg-[rgba(34, 197, 94, 0.1)]' : 'border-[var(--border)] hover:bg-[rgba(255,255,255,0.02)] filter ' + (i > historyIndex ? 'opacity-50 grayscale' : '')}`}
                    onClick={() => jumpToState(i)}
                 >
                    {i > historyIndex && <div className="absolute top-1 right-2 text-[10px] uppercase text-muted font-bold">Undone</div>}

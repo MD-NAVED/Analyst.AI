@@ -23,15 +23,11 @@
   "fontMono": "monospace",
   "features": {
     "chat": true,
-    "mlLab": true,
     "dashboard": true,
-    "sqlEngine": true,
     "autoAnalyst": true,
     "pdfExport": true,
     "excelExport": true,
-    "dataCleaning": true,
-    "pivotTables": true,
-    "pipeline": true
+    "dataCleaning": true
   },
   "ui": {
     "sidebarDefaultOpen": false,

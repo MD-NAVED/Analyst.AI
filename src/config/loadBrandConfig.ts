@@ -57,8 +57,36 @@ export function applyBrandConfig(config: BrandConfig): void {
   const root = document.documentElement;
 
   // 1. Inject colors as global CSS variables
+  // Map camelCase JSON keys → kebab-case CSS custom properties
+  const camelToKebab = (str: string) =>
+    str.replace(/([A-Z])/g, (m) => `-${m.toLowerCase()}`);
+
+  // Explicit key aliases for backward compatibility
+  const keyAliases: Record<string, string[]> = {
+    bg:            ['--bg'],
+    surface:       ['--surface'],
+    surfaceHover:  ['--surface-raised', '--surface-hover'],
+    surfaceRaised: ['--surface-raised'],
+    border:        ['--border'],
+    primary:       ['--primary'],
+    primaryHover:  ['--primary-hover'],
+    accent:        ['--accent'],
+    success:       ['--success'],
+    warning:       ['--warning'],
+    danger:        ['--danger'],
+    textPrimary:   ['--text-primary'],
+    textSecondary: ['--text-secondary'],
+    textMuted:     ['--text-muted'],
+  };
+
   Object.entries(config.colors).forEach(([key, value]) => {
-    root.style.setProperty(`--${key}`, value);
+    // Set via alias list if available
+    const aliases = keyAliases[key];
+    if (aliases) {
+      aliases.forEach(alias => root.style.setProperty(alias, value as string));
+    }
+    // Always also set the raw camelCase → kebab form as fallback
+    root.style.setProperty(`--${camelToKebab(key)}`, value as string);
   });
 
   // 2. Inject typography variables
