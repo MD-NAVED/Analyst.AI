@@ -6,7 +6,7 @@ export const BrandLoader: React.FC = () => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#070B14',
+        backgroundColor: '#F0EEFF',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -20,11 +20,11 @@ export const BrandLoader: React.FC = () => {
           width: '64px',
           height: '64px',
           borderRadius: '16px',
-          background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
+          background: 'linear-gradient(135deg, #7C3AED 0%, #A78BFA 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 0 30px rgba(99, 102, 241, 0.4)',
+          boxShadow: '0 0 30px rgba(124, 58, 237, 0.35)',
           marginBottom: '20px',
           animation: 'pulse-glow 2s infinite ease-in-out'
         }}
@@ -39,7 +39,7 @@ export const BrandLoader: React.FC = () => {
         style={{
           fontSize: '18px',
           fontWeight: 700,
-          color: '#F1F5F9',
+          color: '#1E1B4B',
           letterSpacing: '0.05em',
           textTransform: 'uppercase',
           marginBottom: '8px'
@@ -47,15 +47,15 @@ export const BrandLoader: React.FC = () => {
       >
         Loading Intelligence
       </div>
-      <div style={{ fontSize: '12px', color: '#94A3B8' }}>
+      <div style={{ fontSize: '12px', color: '#64748B' }}>
         Setting up your customized analytics session...
       </div>
       
       {/* Dynamic Keyframe Injection */}
       <style>{`
         @keyframes pulse-glow {
-          0%, 100% { transform: scale(1); opacity: 0.9; box-shadow: 0 0 30px rgba(99, 102, 241, 0.4); }
-          50% { transform: scale(1.08); opacity: 1; box-shadow: 0 0 50px rgba(99, 102, 241, 0.6); }
+          0%, 100% { transform: scale(1); opacity: 0.9; box-shadow: 0 0 30px rgba(124, 58, 237, 0.35); }
+          50% { transform: scale(1.08); opacity: 1; box-shadow: 0 0 50px rgba(124, 58, 237, 0.55); }
         }
       `}</style>
     </div>
