@@ -426,29 +426,31 @@ interface WizardLayoutProps {
 }
 
 const WizardLayout: React.FC<WizardLayoutProps> = ({ illustration, children, step, totalSteps }) => (
-  <div className="min-h-screen flex font-sans" style={{ background: '#F0EEFF' }}>
-    {/* Left content */}
-    <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 py-12 max-w-lg">
-      {/* Step dots */}
-      <div className="flex gap-2 mb-8">
-        {Array.from({ length: totalSteps }).map((_, i) => (
-          <div
-            key={i}
-            className="h-1.5 rounded-full transition-all duration-300"
-            style={{
-              width: i === step ? 24 : 8,
-              background: i === step ? '#7C3AED' : i < step ? '#C4B5FD' : '#E2E8F0',
-            }}
-          />
-        ))}
+  <div className="min-h-screen w-full flex items-center justify-center font-sans" style={{ background: '#F0EEFF' }}>
+    <div className="w-full max-w-6xl flex flex-col lg:flex-row items-center justify-between px-6 sm:px-12 py-12 gap-12 lg:gap-24">
+      {/* Left content */}
+      <div className="w-full lg:flex-1 max-w-md flex flex-col justify-center">
+        {/* Step dots */}
+        <div className="flex gap-2 mb-8">
+          {Array.from({ length: totalSteps }).map((_, i) => (
+            <div
+              key={i}
+              className="h-1.5 rounded-full transition-all duration-300"
+              style={{
+                width: i === step ? 24 : 8,
+                background: i === step ? '#7C3AED' : i < step ? '#C4B5FD' : '#E2E8F0',
+              }}
+            />
+          ))}
+        </div>
+        {children}
       </div>
-      {children}
-    </div>
 
-    {/* Right illustration */}
-    <div className="hidden lg:flex flex-1 items-center justify-center p-12">
-      <div className="w-full max-w-sm aspect-square">
-        {illustration}
+      {/* Right illustration */}
+      <div className="hidden lg:flex lg:flex-1 items-center justify-center w-full max-w-md">
+        <div className="w-full aspect-square max-h-[360px]">
+          {illustration}
+        </div>
       </div>
     </div>
   </div>
