@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, AlertCircle, ArrowRight, ChevronLeft, RefreshCcw, Loader2 } from 'lucide-react';
 import { DynamicLogo } from './branding/DynamicLogo';
+import { CustomSelect } from './CustomSelect';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -606,33 +607,25 @@ const StepWorkspace: React.FC<StepWorkspaceProps> = ({ data, onChange, onNext, o
         </div>
         <div>
           <label className="block text-sm font-semibold text-[#334155] mb-1.5">How large is your team?</label>
-          <div className="relative">
-            <select
-              value={data.teamSize}
-              onChange={e => onChange({ teamSize: e.target.value })}
-              className={`${PILL_INPUT} appearance-none pr-10 cursor-pointer`}
-              style={{ WebkitAppearance: 'none' }}
-            >
-              <option value="">Select one</option>
-              {TEAM_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-[#94A3B8]">▾</div>
-          </div>
+          <CustomSelect 
+            value={data.teamSize}
+            onChange={(val) => onChange({ teamSize: val })}
+            options={[
+              { value: '', label: 'Select one' },
+              ...TEAM_SIZES.map(s => ({ value: s, label: s }))
+            ]}
+          />
         </div>
         <div>
           <label className="block text-sm font-semibold text-[#334155] mb-1.5">What best describes your industry?</label>
-          <div className="relative">
-            <select
-              value={data.industry}
-              onChange={e => onChange({ industry: e.target.value })}
-              className={`${PILL_INPUT} appearance-none pr-10 cursor-pointer`}
-              style={{ WebkitAppearance: 'none' }}
-            >
-              <option value="">Select one</option>
-              {INDUSTRIES.map(i => <option key={i} value={i}>{i}</option>)}
-            </select>
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-[#94A3B8]">▾</div>
-          </div>
+          <CustomSelect 
+            value={data.industry}
+            onChange={(val) => onChange({ industry: val })}
+            options={[
+              { value: '', label: 'Select one' },
+              ...INDUSTRIES.map(i => ({ value: i, label: i }))
+            ]}
+          />
         </div>
         <div className="flex gap-3 mt-2">
           <button onClick={onBack} className={OUTLINE_BTN}>
