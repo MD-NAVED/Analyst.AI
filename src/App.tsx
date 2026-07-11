@@ -2232,14 +2232,14 @@ STRICT RULES:
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Parser Constraints</label>
-                  <label className="flex items-center gap-2.5 cursor-pointer bg-[var(--surface-raised)] border border-[var(--border)] p-2.5 rounded-lg hover:border-[var(--primary)] transition-colors w-full">
+                  <label className="flex items-center gap-2.5 cursor-pointer bg-[var(--surface-raised)] border border-[var(--border)] px-3.5 rounded-xl hover:border-[var(--primary)] transition-colors w-full min-h-[40px] text-xs shadow-sm">
                     <input 
                       type="checkbox" 
                       checked={strictMode}
                       onChange={(e) => setStrictMode(e.target.checked)}
                       className="accent-blue-600 w-4 h-4 cursor-pointer align-middle rounded"
                     />
-                    <span className="text-xs text-[var(--text-primary)] font-medium leading-none">Strict Mode (skip null rows)</span>
+                    <span className="text-xs text-[var(--text-primary)] font-semibold leading-none">Strict Mode (skip null rows)</span>
                   </label>
                 </div>
               </div>
