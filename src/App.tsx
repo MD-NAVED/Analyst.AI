@@ -3741,7 +3741,7 @@ const ChartsSection = () => {
         </div>
 
         {expandedChart && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-black/80 backdrop-blur-sm" onClick={() => setExpandedChart(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-slate-950/30 backdrop-blur-[2px]" onClick={() => setExpandedChart(null)}>
             <div className="bg-[var(--surface)] w-full max-w-6xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--border)]" onClick={e => e.stopPropagation()}>
               <div className="flex justify-between items-center p-6 border-b border-[var(--border)]">
                 <div>
