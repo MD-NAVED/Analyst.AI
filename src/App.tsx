@@ -1201,7 +1201,6 @@ function MainApp() {
   const [autoPilotCharts, setAutoPilotCharts] = useState<any[]>([]);
   const [autoPilotReport, setAutoPilotReport] = useState<any>(null);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('gemini-3.1-flash-lite');
   // Lifted Section states for rendering as pure helper functions (stable refs, zero blink)
   const [uploadIsDragging, setUploadIsDragging] = useState(false);
   const [previewSearch, setPreviewSearch] = useState('');
@@ -1442,7 +1441,7 @@ STRICT RULES:
 2. Ensure the column names used in 'recommended_charts' exactly match the provided metadata.
 3. The tone must be professional, corporate, and insight-driven.`;
         
-        const result = await callAI({ prompt: context, model: selectedModel });
+        const result = await callAI({ prompt: context });
         
         let text = result.text || "";
         text = text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -1879,27 +1878,8 @@ STRICT RULES:
               <h2>Auto-Analyst <Sparkles className="inline-block ml-2 text-[var(--primary)]" size={24}/></h2>
               <p className="text-muted mt-1">One-click data cleaning, insight generation, and visualization.</p>
            </div>
-            <div className="flex gap-3 items-center">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted font-semibold hidden md:inline">AI Model:</span>
-                <CustomSelect
-                  size="sm"
-                  className="w-48"
-                  value={selectedModel}
-                  onChange={(val) => setSelectedModel(val)}
-                  options={[
-                    { value: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite (Saved Quota)" },
-                    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
-                    { value: "auto", label: "OmniRoute Auto-Router" },
-                    { value: "openrouter/free", label: "OpenRouter Free Models" },
-                    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-                    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-                    { value: "claude-sonnet-4-6", label: "Claude 3.5 Sonnet" },
-                    { value: "claude-opus-4-6-thinking", label: "Claude 3 Opus" }
-                  ]}
-                />
-              </div>
-              {autoPilotStatus === 'done' && (
+           <div className="flex gap-3">
+             {autoPilotStatus === 'done' && (
                <button 
                  className="btn-secondary flex items-center gap-2" 
                  onClick={exportReportToPDF}
@@ -2932,7 +2912,7 @@ STRICT RULES:
         setEdaLoadingInsights(true);
         try {
             let context = `Columns: ${columns.map(c => c.name).join(', ')}. \nHere are 5 samples: ${JSON.stringify(data.slice(0,5))}. \nGive exactly 5 bullet points of quick data analytics insights based on this data. Format as just 5 short, punchy plain text strings separated by newlines. No markdown bullets.`;
-            const result = await callAI({ prompt: context, model: selectedModel });
+            const result = await callAI({ prompt: context });
             const text = result.text || "";
             setEdaInsights(text.split('\n').filter((l: string) => l.trim().length > 0).slice(0,5).map((s: string) => s.replace(/^[-*•]\s*/, '').trim()));
         } catch (e: any) {
@@ -3112,7 +3092,7 @@ STRICT RULES:
                  const msgsToCompress = currentMessages.slice(1, currentMessages.length - 4);
                  if (msgsToCompress.length > 0) {
                      const summarizePrompt = `Summarize the following chat history to serve as a compact context memory for future turns. Update the previous memory with any new important info.\n\nPrevious memory: ${activeMemory}\n\nChat:\n${msgsToCompress.map(m=>`${m.role}: ${m.content}`).join('\n')}`;
-                     const sumResult = await callAI({ contents: [{role: 'user', parts: [{text: summarizePrompt}]}], model: selectedModel });
+                     const sumResult = await callAI({ contents: [{role: 'user', parts: [{text: summarizePrompt}]}]});
                      activeMemory = sumResult.text || activeMemory;
                      setChatMemory(activeMemory);
                      currentMessages = [currentMessages[0], ...currentMessages.slice(currentMessages.length - 4)];
@@ -3139,7 +3119,7 @@ STRICT RULES:
              const tokenCountEstimate = Math.round(JSON.stringify(contents).length / 4);
              setTokenEstimate(tokenCountEstimate);
 
-             const result = await callAI({ contents, model: selectedModel });
+             const result = await callAI({ contents });
              
              setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: result.text || "No response." }]);
          } catch (e: any) {
