@@ -30,14 +30,15 @@ const handler = async (req, res) => {
     }
 
     // ─── 1. OPENROUTER FREE OPEN-SOURCE MODELS FLOW ───
-    if (process.env.OPENROUTER_API_KEY) {
+    const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OMNIROUTER_API_KEY;
+    if (openRouterKey) {
       const selectedModel = model || 'meta-llama/llama-3-8b-instruct:free';
-      console.log(`Processing with OpenRouter open-source model: ${selectedModel}`);
+      console.log(`Processing with OpenRouter/Omnirouter open-source model: ${selectedModel}`);
       
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Authorization": `Bearer ${openRouterKey}`,
           "Content-Type": "application/json",
           "HTTP-Referer": "https://datalens-ai.vercel.app", // Optional referer for OpenRouter analytics
           "X-Title": "DataLens AI"
@@ -77,7 +78,7 @@ const handler = async (req, res) => {
 
     // ─── 3. NO API KEYS CONFIGURED (FORCE LOCAL FALLBACK) ───
     return res.status(400).json({ 
-      error: 'No AI API keys configured (OPENROUTER_API_KEY or GEMINI_API_KEY). Triggering local statistical fallback engine.' 
+      error: 'No AI API keys configured (OPENROUTER_API_KEY, OMNIROUTER_API_KEY, or GEMINI_API_KEY). Triggering local statistical fallback engine.' 
     });
 
   } catch (error) {
