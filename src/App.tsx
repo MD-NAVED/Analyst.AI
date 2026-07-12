@@ -1158,6 +1158,18 @@ function MainApp() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
 
+  // Smoothly trigger resize events during sidebar collapse/expand transitions
+  // so Recharts ResponsiveContainers adjust width dynamically
+  useEffect(() => {
+    const intervals = [50, 100, 150, 200, 250, 300, 350, 400];
+    const timers = intervals.map(delay => 
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, delay)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [desktopSidebarCollapsed]);
+
   const selectTab = (tab: 'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'eda' | 'chat' | 'dashboard' | 'auto-analyst') => {
     setActiveTab(tab);
     setSidebarOpen(false);
