@@ -1677,9 +1677,11 @@ STRICT RULES:
         const activeChartEl = document.getElementById(`auto-chart-${i}`);
         if (activeChartEl && currentChartsTarget) {
           const remCharts = autoPilotCharts.length - i;
-          const contentArea = currentChartsPage.querySelector('.pdf-content') as HTMLElement;
-          const occupiedHeight = contentArea ? contentArea.scrollHeight : 0;
-          const remainingSpace = 880 - occupiedHeight;
+          
+          // Calculate actual occupied space inside the charts target, accounting for section title on Page 1
+          const chartsHeight = currentChartsTarget ? currentChartsTarget.scrollHeight : 0;
+          const occupiedHeight = (chartPageCount === 1 ? 50 : 0) + chartsHeight;
+          const remainingSpace = 850 - occupiedHeight;
 
           let targetChartHeight = 360;
           let useCompression = false;
@@ -1727,7 +1729,8 @@ STRICT RULES:
             line.style.stroke = '#e2e8f0';
           });
 
-          await new Promise(resolve => setTimeout(resolve, 150));
+          // Increase painting delay from 150ms to 300ms to ensure Recharts rendering wraps SVG layout changes fully
+          await new Promise(resolve => setTimeout(resolve, 300));
 
           const chartCanvas = await html2canvas(cloned, {
             scale: 2,
@@ -1792,8 +1795,10 @@ STRICT RULES:
           chartItemDiv.appendChild(img);
           currentChartsTarget.appendChild(chartItemDiv);
 
-          const pageContentArea = currentChartsPage.querySelector('.pdf-content') as HTMLElement;
-          if (pageContentArea && pageContentArea.scrollHeight > 880) {
+          // Measure occupied height inside charts target container after adding the new chart
+          const chartsHeightAfter = currentChartsTarget ? currentChartsTarget.scrollHeight : 0;
+          const occupiedHeightAfter = (chartPageCount === 1 ? 50 : 0) + chartsHeightAfter;
+          if (occupiedHeightAfter > 850) {
             currentChartsTarget.removeChild(chartItemDiv);
 
             chartPageCount++;
