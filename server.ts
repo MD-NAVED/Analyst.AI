@@ -388,7 +388,7 @@ app.post('/api/gemini', authenticateToken, async (req, res) => {
     // ─── 1. OMNIROUTE LOCAL ROUTING FLOW (TOP PRIORITY) ───
     const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
     if (omniRouteKey) {
-      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://localhost:20128/v1/chat/completions';
+      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://127.0.0.1:20128/v1/chat/completions';
       const selectedModel = model || 'auto';
       console.log(`[LocalServer] Routing /api/gemini to OmniRoute at ${omniRouteUrl} using model: ${selectedModel}`);
       
@@ -421,7 +421,7 @@ app.post('/api/gemini', authenticateToken, async (req, res) => {
     // ─── 2. OPENROUTER CLOUD OS FLOW ───
     const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OMNIROUTER_API_KEY;
     if (openRouterKey) {
-      const selectedModel = model || 'meta-llama/llama-3-8b-instruct:free';
+      const selectedModel = model || 'openrouter/free';
       console.log(`[LocalServer] Routing /api/gemini to OpenRouter using model: ${selectedModel}`);
       
       try {
@@ -497,7 +497,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     // ─── 1. OMNIROUTE LOCAL ROUTING FLOW (TOP PRIORITY) ───
     const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
     if (omniRouteKey) {
-      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://localhost:20128/v1/chat/completions';
+      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://127.0.0.1:20128/v1/chat/completions';
       const selectedModel = model || 'auto';
       console.log(`[LocalServer] Routing /api/chat to OmniRoute at ${omniRouteUrl} using model: ${selectedModel}`);
       
@@ -530,7 +530,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     // ─── 2. OPENROUTER CLOUD OS FLOW ───
     const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OMNIROUTER_API_KEY;
     if (openRouterKey) {
-      const selectedModel = model || 'meta-llama/llama-3-8b-instruct:free';
+      const selectedModel = model || 'openrouter/free';
       console.log(`[LocalServer] Routing /api/chat to OpenRouter using model: ${selectedModel}`);
       
       try {

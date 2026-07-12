@@ -32,7 +32,7 @@ const handler = async (req, res) => {
     // ─── 1. OMNIROUTE LOCAL ROUTING FLOW (TOP PRIORITY) ───
     const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
     if (omniRouteKey) {
-      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://localhost:20128/v1/chat/completions';
+      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://127.0.0.1:20128/v1/chat/completions';
       const selectedModel = model || 'auto';
       console.log(`Processing with OmniRoute local router at ${omniRouteUrl} with model: ${selectedModel}`);
       
@@ -63,7 +63,7 @@ const handler = async (req, res) => {
     // ─── 2. OPENROUTER FREE OPEN-SOURCE MODELS FLOW ───
     const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OMNIROUTER_API_KEY;
     if (openRouterKey) {
-      const selectedModel = model || 'meta-llama/llama-3-8b-instruct:free';
+      const selectedModel = model || 'openrouter/free';
       console.log(`Processing with OpenRouter open-source model: ${selectedModel}`);
       
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
