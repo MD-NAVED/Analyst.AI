@@ -348,6 +348,33 @@ app.get('/api/auth/me', (req, res) => {
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
+// Helper to convert Gemini payload structures to standard OpenAI-style messages array
+function convertGeminiToOpenAI(contents: any, defaultPrompt?: string): any[] {
+  if (!contents) {
+    return [{ role: 'user', content: defaultPrompt || '' }];
+  }
+  if (typeof contents === 'string') {
+    return [{ role: 'user', content: contents }];
+  }
+  if (Array.isArray(contents)) {
+    return contents.map((c: any) => {
+      const role = c.role === 'model' || c.role === 'assistant' ? 'assistant' : 'user';
+      const content = Array.isArray(c.parts) 
+        ? c.parts.map((p: any) => p.text || '').join('\n') 
+        : (typeof c.parts === 'string' ? c.parts : '');
+      return { role, content };
+    });
+  }
+  if (typeof contents === 'object') {
+    const role = contents.role === 'model' || contents.role === 'assistant' ? 'assistant' : 'user';
+    const content = Array.isArray(contents.parts) 
+      ? contents.parts.map((p: any) => p.text || '').join('\n') 
+      : '';
+    return [{ role, content }];
+  }
+  return [{ role: 'user', content: defaultPrompt || '' }];
+}
+
 // POST /api/gemini - Accepts single prompt or array of contents (Requires Bearer Auth)
 app.post('/api/gemini', authenticateToken, async (req, res) => {
   try {
@@ -358,32 +385,99 @@ app.post('/api/gemini', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Bad Request: Missing prompt or contents in payload.' });
     }
 
-    if (!ai) {
-      return res.status(502).json({ error: 'AI Service Unavailable: Gemini API key is missing on the server.' });
-    }
+    // ─── 1. OMNIROUTE LOCAL ROUTING FLOW (TOP PRIORITY) ───
+    const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
+    if (omniRouteKey) {
+      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://localhost:20128/v1/chat/completions';
+      const selectedModel = model || 'auto';
+      console.log(`[LocalServer] Routing /api/gemini to OmniRoute at ${omniRouteUrl} using model: ${selectedModel}`);
+      
+      try {
+        const response = await fetch(omniRouteUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${omniRouteKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: convertGeminiToOpenAI(contents, prompt)
+          })
+        });
 
-    const modelName = model || 'gemini-2.5-flash';
-    let response;
-    
-    try {
-      response = await ai.models.generateContent({
-        model: modelName,
-        contents: contents || prompt,
-        config: {
-          temperature: temperature !== undefined ? Number(temperature) : 1.0
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OmniRoute Error (${response.status}): ${errorText}`);
         }
-      });
-    } catch (apiError: any) {
-      console.error(`Gemini generateContent error using ${modelName}:`, apiError);
-      return res.status(500).json({ error: apiError.message || 'AI service error during content generation.' });
+
+        const responseData = await response.json();
+        const textResult = responseData.choices?.[0]?.message?.content || '';
+        return res.json({ text: textResult });
+      } catch (err: any) {
+        console.warn(`[LocalServer] OmniRoute call failed, attempting cloud backup. Error:`, err.message);
+      }
     }
 
-    if (!response || !response.text) {
-      return res.status(500).json({ error: 'Failed to retrieve text response from Gemini API.' });
+    // ─── 2. OPENROUTER CLOUD OS FLOW ───
+    const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OMNIROUTER_API_KEY;
+    if (openRouterKey) {
+      const selectedModel = model || 'meta-llama/llama-3-8b-instruct:free';
+      console.log(`[LocalServer] Routing /api/gemini to OpenRouter using model: ${selectedModel}`);
+      
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${openRouterKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://datalens-ai.vercel.app",
+            "X-Title": "DataLens AI"
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: convertGeminiToOpenAI(contents, prompt)
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OpenRouter Error (${response.status}): ${errorText}`);
+        }
+
+        const responseData = await response.json();
+        const textResult = responseData.choices?.[0]?.message?.content || '';
+        return res.json({ text: textResult });
+      } catch (err: any) {
+        console.warn(`[LocalServer] OpenRouter call failed, attempting Gemini backup. Error:`, err.message);
+      }
     }
 
-    // Strip out the API key or metadata from the response (just return standard text)
-    res.json({ text: response.text });
+    // ─── 3. GEMINI DIRECT FALLBACK ───
+    if (ai) {
+      const modelName = model || 'gemini-2.5-flash';
+      console.log(`[LocalServer] Routing /api/gemini to Gemini using model: ${modelName}`);
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: contents || prompt,
+          config: {
+            temperature: temperature !== undefined ? Number(temperature) : 1.0
+          }
+        });
+        
+        if (response && response.text) {
+          return res.json({ text: response.text });
+        }
+      } catch (apiError: any) {
+        console.error(`[LocalServer] Gemini generateContent error using ${modelName}:`, apiError);
+      }
+    }
+
+    // ─── 4. NO ENGINES WORKED OR CONFIGURED (TRIGGER LOCAL CLIENT-SIDE FALLBACK) ───
+    return res.status(502).json({ 
+      error: 'All AI engines (OmniRoute, OpenRouter, Gemini) failed or are unconfigured. Triggering local statistical fallback engine.' 
+    });
+
   } catch (error: any) {
     console.error('API Analyze internal error:', error);
     res.status(500).json({ error: error.message || 'Failed to analyze data.' });
@@ -400,37 +494,106 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Bad Request: Missing or invalid messages array.' });
     }
 
-    if (!ai) {
-      return res.status(502).json({ error: 'AI Service Unavailable: Gemini API key is missing on the server.' });
-    }
+    // ─── 1. OMNIROUTE LOCAL ROUTING FLOW (TOP PRIORITY) ───
+    const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
+    if (omniRouteKey) {
+      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://localhost:20128/v1/chat/completions';
+      const selectedModel = model || 'auto';
+      console.log(`[LocalServer] Routing /api/chat to OmniRoute at ${omniRouteUrl} using model: ${selectedModel}`);
+      
+      try {
+        const response = await fetch(omniRouteUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${omniRouteKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: messages
+          })
+        });
 
-    // Map messages [{role, content}] to Gemini's native [{role, parts: [{text}]}]
-    const contents = messages.map((m: any) => ({
-      role: m.role === 'assistant' || m.role === 'model' ? 'model' : 'user',
-      parts: [{ text: m.content || '' }]
-    }));
-
-    const modelName = model || 'gemini-2.5-flash';
-    let response;
-
-    try {
-      response = await ai.models.generateContent({
-        model: modelName,
-        contents,
-        config: {
-          temperature: temperature !== undefined ? Number(temperature) : 1.0
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OmniRoute Error (${response.status}): ${errorText}`);
         }
-      });
-    } catch (apiError: any) {
-      console.error(`Gemini generateContent error in chat using ${modelName}:`, apiError);
-      return res.status(500).json({ error: apiError.message || 'AI service error during chat content generation.' });
+
+        const responseData = await response.json();
+        const textResult = responseData.choices?.[0]?.message?.content || '';
+        return res.json({ text: textResult });
+      } catch (err: any) {
+        console.warn(`[LocalServer] OmniRoute call failed in chat, attempting cloud backup. Error:`, err.message);
+      }
     }
 
-    if (!response || !response.text) {
-      return res.status(500).json({ error: 'Failed to retrieve text response from Gemini API.' });
+    // ─── 2. OPENROUTER CLOUD OS FLOW ───
+    const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OMNIROUTER_API_KEY;
+    if (openRouterKey) {
+      const selectedModel = model || 'meta-llama/llama-3-8b-instruct:free';
+      console.log(`[LocalServer] Routing /api/chat to OpenRouter using model: ${selectedModel}`);
+      
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${openRouterKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://datalens-ai.vercel.app",
+            "X-Title": "DataLens AI"
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: messages
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OpenRouter Error (${response.status}): ${errorText}`);
+        }
+
+        const responseData = await response.json();
+        const textResult = responseData.choices?.[0]?.message?.content || '';
+        return res.json({ text: textResult });
+      } catch (err: any) {
+        console.warn(`[LocalServer] OpenRouter call failed in chat, attempting Gemini backup. Error:`, err.message);
+      }
     }
 
-    res.json({ text: response.text });
+    // ─── 3. GEMINI DIRECT FALLBACK ───
+    if (ai) {
+      const modelName = model || 'gemini-2.5-flash';
+      console.log(`[LocalServer] Routing /api/chat to Gemini using model: ${modelName}`);
+      
+      try {
+        // Map messages [{role, content}] to Gemini's native [{role, parts: [{text}]}]
+        const contents = messages.map((m: any) => ({
+          role: m.role === 'assistant' || m.role === 'model' ? 'model' : 'user',
+          parts: [{ text: m.content || '' }]
+        }));
+
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            temperature: temperature !== undefined ? Number(temperature) : 1.0
+          }
+        });
+        
+        if (response && response.text) {
+          return res.json({ text: response.text });
+        }
+      } catch (apiError: any) {
+        console.error(`[LocalServer] Gemini generateContent error in chat using ${modelName}:`, apiError);
+      }
+    }
+
+    // ─── 4. NO ENGINES WORKED OR CONFIGURED ───
+    return res.status(502).json({ 
+      error: 'All AI engines (OmniRoute, OpenRouter, Gemini) failed or are unconfigured. Triggering local statistical fallback engine.' 
+    });
+
   } catch (error: any) {
     console.error('API Chat internal error:', error);
     res.status(500).json({ error: error.message || 'Failed to process chat conversation.' });
