@@ -389,7 +389,7 @@ app.post('/api/gemini', authenticateToken, async (req, res) => {
     const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
     if (omniRouteKey) {
       const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://127.0.0.1:20128/v1/chat/completions';
-      const selectedModel = model || 'auto';
+      const selectedModel = model || 'gemini-3.1-flash-lite';
       console.log(`[LocalServer] Routing /api/gemini to OmniRoute at ${omniRouteUrl} using model: ${selectedModel}`);
       
       try {
@@ -498,7 +498,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
     if (omniRouteKey) {
       const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://127.0.0.1:20128/v1/chat/completions';
-      const selectedModel = model || 'auto';
+      const selectedModel = model || 'gemini-3.1-flash-lite';
       console.log(`[LocalServer] Routing /api/chat to OmniRoute at ${omniRouteUrl} using model: ${selectedModel}`);
       
       try {
