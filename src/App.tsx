@@ -3158,10 +3158,6 @@ STRICT RULES:
            <div>
              <h2>AI Data Assistant</h2>
              <p className="text-muted mt-1">Talk to your dataset naturally</p>
-             <div className="font-mono text-[10px] text-[var(--accent)] mt-1">
-                ~{tokenEstimate.toLocaleString()} tokens used
-                {tokenEstimate > 4000 && <span className="ml-2 text-[var(--danger)]">Approaching rate limits!</span>}
-             </div>
            </div>
            <div className="flex gap-2 flex-wrap items-center">
                <span className="text-xs text-muted">History: {chatMessages.length}/10</span>
