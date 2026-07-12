@@ -11,12 +11,14 @@ import {
   Sparkles, 
   Bell, 
   Wand2, 
-  PieChart 
+  PieChart,
+  Download
 } from 'lucide-react';
 import { DynamicLogo } from './branding/DynamicLogo';
 
 interface LandingPageProps {
   onStartAuth: (mode: 'login' | 'register') => void;
+  onDownloadDesktop: () => void;
   appName: string;
   appTagline: string;
 }
@@ -41,7 +43,7 @@ const sparklineMock = [
   { val: 10 }, { val: 15 }, { val: 8 }, { val: 12 }, { val: 20 }, { val: 18 }, { val: 25 }
 ];
 
-export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, appTagline }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, onDownloadDesktop, appName, appTagline }) => {
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#F8FAFC] text-slate-900 font-sans relative overflow-x-hidden">
       
@@ -77,13 +79,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartAuth, appName, 
             {appTagline || "Powerful analytics dashboard that helps you understand your business metrics, track KPIs, and make data-driven decisions in real-time."}
           </p>
           
-          <div className="flex mb-8">
+          <div className="flex flex-wrap gap-4 mb-8 w-full sm:w-auto">
             <button 
               onClick={() => onStartAuth('register')}
               className="flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer text-sm w-full sm:w-auto group"
             >
-              Get Started
+              Get Started (Web)
               <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+            </button>
+            <button 
+              onClick={onDownloadDesktop}
+              className="flex items-center justify-center gap-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold px-6 py-3.5 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer text-sm w-full sm:w-auto group"
+            >
+              <Download size={16} className="text-slate-500 group-hover:translate-y-0.5 transition-transform" />
+              Download for Windows
             </button>
           </div>
 
