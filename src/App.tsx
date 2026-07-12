@@ -3303,18 +3303,28 @@ const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg'
     addToast('Chart element not found', 'error');
     return;
   }
+
+  // Target the actual responsive container holding the chart inside the card, or fallback to the element
+  const chartWrapper = element.querySelector('.recharts-responsive-container') || element;
   
   const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
   const safeFileName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
   if (format === 'svg') {
     try {
-      const svgElement = element.querySelector('svg');
+      const svgElement = chartWrapper.querySelector('svg');
       if (!svgElement) {
          addToast('SVG not found for this chart', 'error');
          return;
       }
+      
+      // Setup the SVG canvas size correctly for downloads
       const clone = svgElement.cloneNode(true) as SVGElement;
+      const width = svgElement.clientWidth || svgElement.getBoundingClientRect().width || 800;
+      const height = svgElement.clientHeight || svgElement.getBoundingClientRect().height || 400;
+      
+      clone.setAttribute('width', String(width));
+      clone.setAttribute('height', String(height));
       if (!clone.getAttribute('xmlns')) {
           clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       }
@@ -3352,7 +3362,7 @@ const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg'
   }
 
   try {
-    const canvas = await html2canvas(element, { 
+    const canvas = await html2canvas(chartWrapper as HTMLElement, { 
       scale: 2, 
       backgroundColor: '#ffffff', // Use white instead of dark for export
       useCORS: true,
