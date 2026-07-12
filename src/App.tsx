@@ -12,7 +12,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis, AreaChart, Area
+  LineChart, Line, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis, AreaChart, Area, Brush
 } from 'recharts';
 import { saveSession, loadSession, clearSession, getStorageEstimate } from './lib/db';
 import { jsPDF } from 'jspdf';
@@ -3294,7 +3294,8 @@ STRICT RULES:
 
 const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg' = 'png', fileInfo: any, addToast: any) => {
   addToast(`Generating ${format.toUpperCase()}...`, 'info');
-  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  // Wait a bit to ensure any Recharts animations are finished before export
+  await new Promise(resolve => setTimeout(resolve, 800));
   
   const element = document.getElementById(id);
   if (!element) {
@@ -3316,6 +3317,22 @@ const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg'
       if (!clone.getAttribute('xmlns')) {
           clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       }
+      
+      // Inject CSS styles into the SVG clone so it renders properly in external viewers
+      const svgTexts = clone.querySelectorAll('text');
+      svgTexts.forEach((text: any) => {
+        text.setAttribute('fill', '#475569');
+        text.style.fill = '#475569';
+        text.style.fontSize = '12px';
+        text.style.fontFamily = 'sans-serif';
+      });
+
+      const svgGrids = clone.querySelectorAll('.recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line');
+      svgGrids.forEach((line: any) => {
+        line.setAttribute('stroke', '#e2e8f0');
+        line.style.stroke = '#e2e8f0';
+      });
+
       const svgData = new XMLSerializer().serializeToString(clone);
       const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -3336,9 +3353,10 @@ const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg'
   try {
     const canvas = await html2canvas(element, { 
       scale: 2, 
-      backgroundColor: '#0D1117',
+      backgroundColor: '#ffffff', // Use white instead of dark for export
       useCORS: true,
-      allowTaint: true
+      allowTaint: true,
+      logging: false
     });
     const imgData = canvas.toDataURL('image/png');
     const a = document.createElement('a');
@@ -3352,7 +3370,7 @@ const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg'
   }
 };
 
-const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportingPDF, fileInfo, addToast }: { title: string, type: 'bar' | 'line' | 'pie' | 'scatter' | 'hist' | 'area', id: string, data: any[], columns: any[], isSampledView: boolean, isExportingPDF: boolean, fileInfo: any, addToast: any }) => {
+const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportingPDF, fileInfo, addToast, onExpand }: { title: string, type: 'bar' | 'line' | 'pie' | 'scatter' | 'hist' | 'area', id: string, data: any[], columns: any[], isSampledView: boolean, isExportingPDF: boolean, fileInfo: any, addToast: any, onExpand?: (config: any) => void }) => {
   const numericCols = columns.filter(c => c.type === 'number');
   const allCols = columns;
   const [xAxis, setXAxis] = useState(allCols[0]?.name || '');
@@ -3438,6 +3456,39 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
        }
     }
 
+    if (type === 'bar' || type === 'line' || type === 'area') {
+        const xCol = columns.find(c => c.name === xAxis);
+        const xIsNumeric = xCol?.type === 'number';
+        if (!xIsNumeric) {
+            // Aggregate by categorical X axis
+            const aggMap = new Map<string, { sum: number, count: number }>();
+            sliceData.forEach(d => {
+                const key = String(d[xAxis] || 'Unknown');
+                const val = Number(d[yAxis]);
+                if (!isNaN(val)) {
+                    if (!aggMap.has(key)) aggMap.set(key, { sum: 0, count: 0 });
+                    const entry = aggMap.get(key)!;
+                    entry.sum += val;
+                    entry.count += 1;
+                }
+            });
+            return Array.from(aggMap.entries())
+                .map(([key, { sum, count }]) => ({ [xAxis]: key, [yAxis]: parseFloat((sum / count).toFixed(2)) }))
+                .sort((a: any, b: any) => b[yAxis] - a[yAxis])
+                .slice(0, 30); // Max 30 bars/points for categorical
+        } else {
+            // Downsample numeric X axis (e.g., time series)
+            const maxPoints = 200;
+            if (sliceData.length > maxPoints) {
+                const step = Math.ceil(sliceData.length / maxPoints);
+                return sliceData.filter((_, i) => i % step === 0).map(d => ({
+                    ...d,
+                    [yAxis]: Number(d[yAxis])
+                }));
+            }
+        }
+    }
+
     return sliceData.map(d => ({
       ...d,
       [yAxis]: Number(d[yAxis])
@@ -3466,6 +3517,12 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
           )}
         </div>
         <div className="flex gap-1">
+          {onExpand && (
+            <button className="btn-icon mr-2" title="Expand Chart" onClick={() => onExpand({ title: chartTitle, type, xAxis, yAxis, data: chartData })}>
+              <span className="text-[10px] font-mono font-bold mr-1 opacity-70">ZOOM</span> 
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+            </button>
+          )}
           <button className="btn-icon" title="Download SVG" onClick={() => downloadChart(id, chartTitle, 'svg', fileInfo, addToast)}>
             <span className="text-[10px] font-mono font-bold mr-1 opacity-70">SVG</span> <Download size={14} />
           </button>
@@ -3560,7 +3617,7 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
               <YAxis tick={{fill: 'var(--text-muted)', fontSize: 11}} axisLine={false} tickLine={false} />
               <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
               <Bar dataKey="count" fill="url(#barGradient2)" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={!isExportingPDF} animationDuration={isExportingPDF ? 0 : 1500} animationEasing="ease-in-out" />
-            </BarChart>
+          </BarChart>
           )}
         </ResponsiveContainer>
       </div>
@@ -3571,6 +3628,7 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
 const ChartsSection = () => {
     const numericCols = columns.filter(c => c.type === 'number');
     const isSampledView = chartsIsSampledView;
+    const [expandedChart, setExpandedChart] = useState<any>(null);
 
     if (!data.length) return <div className="text-center mt-20">No data loaded</div>;
     if (numericCols.length === 0) return <div className="text-center mt-20">Numeric columns required for charting.</div>;
@@ -3607,6 +3665,7 @@ const ChartsSection = () => {
               isExportingPDF={isExportingPDF}
               fileInfo={fileInfo}
               addToast={addToast}
+              onExpand={setExpandedChart}
             />
           </div>
           <div className="fade-in-up stagger-2">
@@ -3620,6 +3679,7 @@ const ChartsSection = () => {
               isExportingPDF={isExportingPDF}
               fileInfo={fileInfo}
               addToast={addToast}
+              onExpand={setExpandedChart}
             />
           </div>
           <div className="fade-in-up stagger-3">
@@ -3633,6 +3693,7 @@ const ChartsSection = () => {
               isExportingPDF={isExportingPDF}
               fileInfo={fileInfo}
               addToast={addToast}
+              onExpand={setExpandedChart}
             />
           </div>
           <div className="fade-in-up stagger-4">
@@ -3646,6 +3707,7 @@ const ChartsSection = () => {
               isExportingPDF={isExportingPDF}
               fileInfo={fileInfo}
               addToast={addToast}
+              onExpand={setExpandedChart}
             />
           </div>
           <div className="fade-in-up stagger-1">
@@ -3659,6 +3721,7 @@ const ChartsSection = () => {
               isExportingPDF={isExportingPDF}
               fileInfo={fileInfo}
               addToast={addToast}
+              onExpand={setExpandedChart}
             />
           </div>
           <div className="fade-in-up stagger-2">
@@ -3672,9 +3735,93 @@ const ChartsSection = () => {
               isExportingPDF={isExportingPDF}
               fileInfo={fileInfo}
               addToast={addToast}
+              onExpand={setExpandedChart}
             />
           </div>
         </div>
+
+        {expandedChart && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-black/80 backdrop-blur-sm" onClick={() => setExpandedChart(null)}>
+            <div className="bg-[var(--surface)] w-full max-w-6xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-[var(--border)]" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center p-6 border-b border-[var(--border)]">
+                <div>
+                  <h3 className="text-xl font-bold">{expandedChart.title}</h3>
+                  <p className="text-sm text-muted">Detailed Interactive View</p>
+                </div>
+                <button className="p-2 rounded-full hover:bg-[var(--surface-light)] transition-colors" onClick={() => setExpandedChart(null)}>
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="flex-1 p-6 min-h-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  {expandedChart.type === 'bar' ? (
+                    <BarChart data={expandedChart.data} margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                      <defs>
+                        <linearGradient id="expBarGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
+                          <stop offset="100%" stopColor="#8B5CF6" stopOpacity={1}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                      <XAxis dataKey={expandedChart.xAxis} tick={{fill: 'var(--text-muted)'}} axisLine={{stroke: '#E2E8F0'}} />
+                      <YAxis tick={{fill: 'var(--text-muted)'}} axisLine={false} />
+                      <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
+                      <Legend verticalAlign="top" wrapperStyle={{paddingBottom: '20px'}} />
+                      <Brush dataKey={expandedChart.xAxis} height={30} stroke="#8B5CF6" fill="rgba(139,92,246,0.1)" />
+                      <Bar name={expandedChart.yAxis} dataKey={expandedChart.yAxis} fill="url(#expBarGradient)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  ) : expandedChart.type === 'area' ? (
+                    <AreaChart data={expandedChart.data} margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                      <defs>
+                        <linearGradient id="expAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                      <XAxis dataKey={expandedChart.xAxis} tick={{fill: 'var(--text-muted)'}} axisLine={{stroke: '#E2E8F0'}} />
+                      <YAxis tick={{fill: 'var(--text-muted)'}} axisLine={false} />
+                      <RechartsTooltip content={<CustomTooltip />} />
+                      <Legend verticalAlign="top" wrapperStyle={{paddingBottom: '20px'}} />
+                      <Brush dataKey={expandedChart.xAxis} height={30} stroke="#8B5CF6" fill="rgba(139,92,246,0.1)" />
+                      <Area name={expandedChart.yAxis} type="monotone" dataKey={expandedChart.yAxis} stroke="#3B82F6" fillOpacity={1} fill="url(#expAreaGradient)" strokeWidth={3} />
+                    </AreaChart>
+                  ) : expandedChart.type === 'line' ? (
+                    <LineChart data={expandedChart.data} margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                      <XAxis dataKey={expandedChart.xAxis} tick={{fill: 'var(--text-muted)'}} axisLine={{stroke: '#E2E8F0'}} />
+                      <YAxis tick={{fill: 'var(--text-muted)'}} axisLine={false} />
+                      <RechartsTooltip content={<CustomTooltip />} />
+                      <Legend verticalAlign="top" wrapperStyle={{paddingBottom: '20px'}} />
+                      <Brush dataKey={expandedChart.xAxis} height={30} stroke="#8B5CF6" fill="rgba(139,92,246,0.1)" />
+                      <Line name={expandedChart.yAxis} type="monotone" dataKey={expandedChart.yAxis} stroke="#3B82F6" strokeWidth={3} activeDot={{r: 8}} />
+                    </LineChart>
+                  ) : expandedChart.type === 'pie' ? (
+                    <PieChart>
+                      <Pie data={expandedChart.data} cx="50%" cy="50%" innerRadius="40%" outerRadius="70%" paddingAngle={5} dataKey="value" label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                        {expandedChart.data.map((entry: any, index: number) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
+                      </Pie>
+                      <RechartsTooltip content={<CustomTooltip />} />
+                      <Legend />
+                    </PieChart>
+                  ) : expandedChart.type === 'scatter' ? (
+                    <ScatterChart margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                      <XAxis type="number" dataKey={expandedChart.xAxis} name={expandedChart.xAxis} tick={{fill: 'var(--text-muted)'}} />
+                      <YAxis type="number" dataKey={expandedChart.yAxis} name={expandedChart.yAxis} tick={{fill: 'var(--text-muted)'}} />
+                      <ZAxis dataKey={expandedChart.data[0] && expandedChart.data[0].count !== undefined ? 'count' : ''} range={[60, 400]} />
+                      <RechartsTooltip content={<CustomTooltip />} cursor={{strokeDasharray: '3 3'}} />
+                      <Legend verticalAlign="top" wrapperStyle={{paddingBottom: '20px'}} />
+                      <Scatter name={`${expandedChart.yAxis} vs ${expandedChart.xAxis}`} data={expandedChart.data} fill="#3B82F6" />
+                    </ScatterChart>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-muted">Detailed view not available for this type.</div>
+                  )}
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
 };
