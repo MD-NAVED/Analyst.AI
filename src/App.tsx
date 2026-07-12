@@ -678,28 +678,48 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
 
   const downloadChart = async (id: string, fileName: string, format: 'png' | 'svg' = 'png') => {
     addToast(`Generating ${format.toUpperCase()}...`, 'info');
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise(resolve => setTimeout(resolve, 800));
     
     const element = document.getElementById(id);
     if (!element) {
       addToast('Chart element not found', 'error');
       return;
     }
-    
+
+    const chartWrapper = element.querySelector('.recharts-responsive-container') || element;
     const filePrefix = fileInfo?.name?.replace(/\.[^/.]+$/, "") || "dataset";
     const safeFileName = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
     if (format === 'svg') {
       try {
-        const svgElement = element.querySelector('svg');
+        const svgElement = chartWrapper.querySelector('svg');
         if (!svgElement) {
            addToast('SVG not found for this chart', 'error');
            return;
         }
         const clone = svgElement.cloneNode(true) as SVGElement;
+        const width = svgElement.clientWidth || svgElement.getBoundingClientRect().width || 800;
+        const height = svgElement.clientHeight || svgElement.getBoundingClientRect().height || 400;
+        clone.setAttribute('width', String(width));
+        clone.setAttribute('height', String(height));
         if (!clone.getAttribute('xmlns')) {
            clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
         }
+        
+        const svgTexts = clone.querySelectorAll('text');
+        svgTexts.forEach((text: any) => {
+          text.setAttribute('fill', '#475569');
+          text.style.fill = '#475569';
+          text.style.fontSize = '12px';
+          text.style.fontFamily = 'sans-serif';
+        });
+
+        const svgGrids = clone.querySelectorAll('.recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line');
+        svgGrids.forEach((line: any) => {
+          line.setAttribute('stroke', '#e2e8f0');
+          line.style.stroke = '#e2e8f0';
+        });
+
         const svgData = new XMLSerializer().serializeToString(clone);
         const svgBlob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
         const svgUrl = URL.createObjectURL(svgBlob);
@@ -709,6 +729,7 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
         document.body.appendChild(downloadLink);
         downloadLink.click();
         document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(svgUrl);
         addToast('Exported SVG successfully', 'success');
       } catch (e) {
         console.error(e);
@@ -718,7 +739,7 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
     }
 
     try {
-      const canvas = await html2canvas(element, {
+      const canvas = await html2canvas(chartWrapper as HTMLElement, {
         scale: 2,
         backgroundColor: '#FFFFFF',
         useCORS: true,
@@ -769,10 +790,17 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
     }
     
     if (type === 'scatter') {
-      return sampledData.map(d => ({
+      const scatterPoints = sampledData.map(d => ({
         [xAxis]: Number(d[xAxis]),
         [yAxis]: Number(d[yAxis])
       })).filter(d => !isNaN(d[xAxis]) && !isNaN(d[yAxis]));
+      
+      const maxScatterPoints = 1000;
+      if (scatterPoints.length > maxScatterPoints) {
+        const step = Math.ceil(scatterPoints.length / maxScatterPoints);
+        return scatterPoints.filter((_, i) => i % step === 0);
+      }
+      return scatterPoints;
     }
     
     // Line / Bar / Area - Group by X and average Y
