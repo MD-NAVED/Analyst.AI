@@ -3755,7 +3755,7 @@ const ChartsSection = () => {
               <div className="flex-1 p-6 min-h-0">
                 <ResponsiveContainer width="100%" height="100%">
                   {expandedChart.type === 'bar' ? (
-                    <BarChart data={expandedChart.data} margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                    <BarChart data={expandedChart.data} margin={{top: 20, right: 60, left: 60, bottom: 20}}>
                       <defs>
                         <linearGradient id="expBarGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
@@ -3771,7 +3771,7 @@ const ChartsSection = () => {
                       <Bar name={expandedChart.yAxis} dataKey={expandedChart.yAxis} fill="url(#expBarGradient)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   ) : expandedChart.type === 'area' ? (
-                    <AreaChart data={expandedChart.data} margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                    <AreaChart data={expandedChart.data} margin={{top: 20, right: 60, left: 60, bottom: 20}}>
                       <defs>
                         <linearGradient id="expAreaGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.8}/>
@@ -3787,7 +3787,7 @@ const ChartsSection = () => {
                       <Area name={expandedChart.yAxis} type="monotone" dataKey={expandedChart.yAxis} stroke="#3B82F6" fillOpacity={1} fill="url(#expAreaGradient)" strokeWidth={3} />
                     </AreaChart>
                   ) : expandedChart.type === 'line' ? (
-                    <LineChart data={expandedChart.data} margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                    <LineChart data={expandedChart.data} margin={{top: 20, right: 60, left: 60, bottom: 20}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
                       <XAxis dataKey={expandedChart.xAxis} tick={{fill: 'var(--text-muted)'}} axisLine={{stroke: '#E2E8F0'}} />
                       <YAxis tick={{fill: 'var(--text-muted)'}} axisLine={false} />
@@ -3805,7 +3805,7 @@ const ChartsSection = () => {
                       <Legend />
                     </PieChart>
                   ) : expandedChart.type === 'scatter' ? (
-                    <ScatterChart margin={{top: 20, right: 30, left: 20, bottom: 20}}>
+                    <ScatterChart margin={{top: 20, right: 60, left: 60, bottom: 20}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                       <XAxis type="number" dataKey={expandedChart.xAxis} name={expandedChart.xAxis} tick={{fill: 'var(--text-muted)'}} />
                       <YAxis type="number" dataKey={expandedChart.yAxis} name={expandedChart.yAxis} tick={{fill: 'var(--text-muted)'}} />
