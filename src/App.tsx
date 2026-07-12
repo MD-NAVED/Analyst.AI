@@ -1251,6 +1251,103 @@ function MainApp() {
   const [edaInsights, setEdaInsights] = useState<string[]>([]);
   const [edaLoadingInsights, setEdaLoadingInsights] = useState(false);
 
+  // === SMART CHART PICKER STATE ===
+  type ChartId = 'bar' | 'area' | 'line' | 'pie' | 'scatter' | 'hist';
+  const ALL_CHART_DEFS: { id: ChartId; label: string; icon: string }[] = [
+    { id: 'bar',     label: 'Bar Chart',    icon: '📊' },
+    { id: 'area',    label: 'Area Chart',   icon: '📈' },
+    { id: 'line',    label: 'Line Chart',   icon: '📉' },
+    { id: 'pie',     label: 'Pie Chart',    icon: '🥧' },
+    { id: 'scatter', label: 'Scatter Plot', icon: '🔵' },
+    { id: 'hist',    label: 'Histogram',    icon: '📶' },
+  ];
+
+  const MAX_ACTIVE_CHARTS = 4;
+
+  /** Analyzes columns and data to suggest the most useful chart types */
+  const getRecommendedCharts = (cols: ColumnInfo[], rows: any[]): ChartId[] => {
+    const numericCols = cols.filter(c => c.type === 'number');
+    const dateCols    = cols.filter(c => c.type === 'date');
+    const textCols    = cols.filter(c => c.type === 'text');
+    const recommended: ChartId[] = [];
+
+    // Count unique values in text columns to determine if pie is useful
+    const textColUniques = textCols.map(col => {
+      const uniq = new Set(rows.slice(0, 500).map(r => r[col.name]).filter(Boolean));
+      return uniq.size;
+    });
+    const hasFewCategoryCol = textColUniques.some(u => u > 1 && u <= 15);
+
+    // Bar is almost always useful if there are numeric + any other columns
+    if (numericCols.length > 0) recommended.push('bar');
+
+    // Histogram is great when there are numeric cols (distribution)
+    if (numericCols.length > 0) recommended.push('hist');
+
+    // Area/Line: great for date columns or sequential numeric data
+    if (dateCols.length > 0) {
+      recommended.push('area');
+      recommended.push('line');
+    } else if (numericCols.length >= 1) {
+      // Still show area as a trend chart even without dates
+      recommended.push('area');
+    }
+
+    // Scatter: useful when there are at least 2 numeric columns
+    if (numericCols.length >= 2) recommended.push('scatter');
+
+    // Pie: only if a categorical text column exists with ≤15 unique values
+    if (hasFewCategoryCol && numericCols.length > 0) recommended.push('pie');
+
+    // Deduplicate and cap at MAX_ACTIVE_CHARTS
+    const unique = Array.from(new Set(recommended));
+    return unique.slice(0, MAX_ACTIVE_CHARTS);
+  };
+
+  const [activeCharts, setActiveCharts] = useState<ChartId[]>(['bar', 'hist']);
+  const [addChartPickerOpen, setAddChartPickerOpen] = useState(false);
+  const addChartPickerRef = useRef<HTMLDivElement>(null);
+
+  // When data or columns change, recompute smart recommendations
+  useEffect(() => {
+    if (columns.length > 0 && data.length > 0) {
+      const recs = getRecommendedCharts(columns, data);
+      setActiveCharts(recs.length > 0 ? recs : ['bar']);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileInfo?.name]);
+
+  // Close add-chart dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (addChartPickerRef.current && !addChartPickerRef.current.contains(e.target as Node)) {
+        setAddChartPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleChart = (id: ChartId) => {
+    setActiveCharts(prev => {
+      if (prev.includes(id)) {
+        // Remove it (always allow removal, even if only 1 left — UX is fine)
+        return prev.filter(c => c !== id);
+      } else {
+        if (prev.length >= MAX_ACTIVE_CHARTS) return prev; // cap reached
+        return [...prev, id];
+      }
+    });
+  };
+
+  const addChart = (id: ChartId) => {
+    setActiveCharts(prev => {
+      if (prev.includes(id) || prev.length >= MAX_ACTIVE_CHARTS) return prev;
+      return [...prev, id];
+    });
+    setAddChartPickerOpen(false);
+  };
+
   // Lifted scroll ref effect for ChatSection
   useEffect(() => {
     if (scrollRef.current) {
@@ -3685,15 +3782,16 @@ const ChartsSection = () => {
 
     return (
       <div className="fade-in-up stagger-1 flex flex-col h-full pb-10">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        {/* Header row */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
           <div>
             <h2>Interactive Visualizations</h2>
-            <p className="text-muted mt-1">Configure and export charts for your analysis</p>
+            <p className="text-muted mt-1">AI-recommended charts for your data · configure and export</p>
           </div>
           <div className="flex items-center gap-3 bg-[var(--surface-light)] px-4 py-2 rounded-lg border border-[var(--border)] w-full sm:w-auto justify-between sm:justify-start">
             <label className="flex items-center gap-2 cursor-pointer text-sm">
-              <input 
-                type="checkbox" 
+              <input
+                type="checkbox"
                 checked={isSampledView}
                 onChange={(e) => setChartsIsSampledView(e.target.checked)}
                 className="accent-[var(--primary)] w-4 h-4"
@@ -3702,93 +3800,111 @@ const ChartsSection = () => {
             </label>
           </div>
         </div>
-        
-        <div className="grid-2">
-          <div className="fade-in-up stagger-1">
-            <ChartWidget 
-              id="chart-1" 
-              type="bar" 
-              title="Bar Chart" 
-              data={data}
-              columns={columns}
-              isSampledView={isSampledView}
-              isExportingPDF={isExportingPDF}
-              fileInfo={fileInfo}
-              addToast={addToast}
-              onExpand={setExpandedChart}
-            />
+
+        {/* ── CHART PICKER BAR ── */}
+        <div className="chart-picker-bar">
+          <div className="chart-picker-label">
+            <Sparkles size={13} />
+            <span>Active Charts</span>
+            <span className={`chart-picker-cap ${activeCharts.length >= MAX_ACTIVE_CHARTS ? 'cap-full' : ''}`}>
+              {activeCharts.length}/{MAX_ACTIVE_CHARTS}
+            </span>
           </div>
-          <div className="fade-in-up stagger-2">
-            <ChartWidget 
-              id="chart-2" 
-              type="area" 
-              title="Area Chart" 
-              data={data}
-              columns={columns}
-              isSampledView={isSampledView}
-              isExportingPDF={isExportingPDF}
-              fileInfo={fileInfo}
-              addToast={addToast}
-              onExpand={setExpandedChart}
-            />
-          </div>
-          <div className="fade-in-up stagger-3">
-            <ChartWidget 
-              id="chart-3" 
-              type="line" 
-              title="Line Chart" 
-              data={data}
-              columns={columns}
-              isSampledView={isSampledView}
-              isExportingPDF={isExportingPDF}
-              fileInfo={fileInfo}
-              addToast={addToast}
-              onExpand={setExpandedChart}
-            />
-          </div>
-          <div className="fade-in-up stagger-4">
-            <ChartWidget 
-              id="chart-4" 
-              type="pie" 
-              title="Distribution Pie" 
-              data={data}
-              columns={columns}
-              isSampledView={isSampledView}
-              isExportingPDF={isExportingPDF}
-              fileInfo={fileInfo}
-              addToast={addToast}
-              onExpand={setExpandedChart}
-            />
-          </div>
-          <div className="fade-in-up stagger-1">
-            <ChartWidget 
-              id="chart-5" 
-              type="scatter" 
-              title="Scatter Plot" 
-              data={data}
-              columns={columns}
-              isSampledView={isSampledView}
-              isExportingPDF={isExportingPDF}
-              fileInfo={fileInfo}
-              addToast={addToast}
-              onExpand={setExpandedChart}
-            />
-          </div>
-          <div className="fade-in-up stagger-2">
-            <ChartWidget 
-              id="chart-6" 
-              type="hist" 
-              title="Histogram" 
-              data={data}
-              columns={columns}
-              isSampledView={isSampledView}
-              isExportingPDF={isExportingPDF}
-              fileInfo={fileInfo}
-              addToast={addToast}
-              onExpand={setExpandedChart}
-            />
+
+          <div className="chart-picker-chips">
+            {activeCharts.map((id) => {
+              const def = ALL_CHART_DEFS.find(d => d.id === id)!;
+              return (
+                <button
+                  key={id}
+                  className="chart-chip chart-chip-active"
+                  onClick={() => toggleChart(id)}
+                  title={`Remove ${def.label}`}
+                >
+                  <span>{def.icon}</span>
+                  <span>{def.label}</span>
+                  <X size={12} className="chart-chip-remove" />
+                </button>
+              );
+            })}
+
+            {/* Add Chart button */}
+            {activeCharts.length < MAX_ACTIVE_CHARTS && (
+              <div className="relative" ref={addChartPickerRef}>
+                <button
+                  className="chart-chip chart-chip-add"
+                  onClick={() => setAddChartPickerOpen(o => !o)}
+                  title="Add a chart"
+                >
+                  <Plus size={13} />
+                  <span>Add Chart</span>
+                </button>
+                {addChartPickerOpen && (
+                  <div className="chart-add-dropdown">
+                    {ALL_CHART_DEFS.filter(d => !activeCharts.includes(d.id)).map(def => (
+                      <button
+                        key={def.id}
+                        className="chart-add-option"
+                        onClick={() => addChart(def.id)}
+                      >
+                        <span>{def.icon}</span>
+                        <span>{def.label}</span>
+                      </button>
+                    ))}
+                    {ALL_CHART_DEFS.filter(d => !activeCharts.includes(d.id)).length === 0 && (
+                      <div className="chart-add-option text-muted text-xs">All charts added</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeCharts.length >= MAX_ACTIVE_CHARTS && (
+              <span className="text-xs text-[var(--text-muted)] italic pl-1 self-center">
+                Max {MAX_ACTIVE_CHARTS} charts — remove one to add another
+              </span>
+            )}
+
+            {activeCharts.length === 0 && (
+              <span className="text-sm text-muted italic pl-2">No charts selected — click "Add Chart" to begin</span>
+            )}
           </div>
         </div>
+
+        {/* ── CHART GRID ── Only renders active charts */}
+        {activeCharts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center flex-1 gap-4 text-muted mt-20">
+            <BarChart2 size={48} className="opacity-20" />
+            <p className="text-lg font-medium opacity-50">No charts selected</p>
+            <p className="text-sm opacity-40">Use the picker above to add charts</p>
+          </div>
+        ) : (
+          <div className="grid-2">
+            {activeCharts.map((id, idx) => {
+              const stagger = ['stagger-1','stagger-2','stagger-3','stagger-4'][idx % 4];
+              const titles: Record<string, string> = {
+                bar: 'Bar Chart', area: 'Area Chart', line: 'Line Chart',
+                pie: 'Distribution Pie', scatter: 'Scatter Plot', hist: 'Histogram',
+              };
+              return (
+                <div key={id} className={`fade-in-up ${stagger}`}>
+                  <ChartWidget
+                    id={`chart-${id}`}
+                    type={id}
+                    title={titles[id]}
+                    data={data}
+                    columns={columns}
+                    isSampledView={isSampledView}
+                    isExportingPDF={isExportingPDF}
+                    fileInfo={fileInfo}
+                    addToast={addToast}
+                    onExpand={setExpandedChart}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {expandedChart && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-slate-950/30 backdrop-blur-[2px]" onClick={() => setExpandedChart(null)}>
