@@ -29,18 +29,49 @@ const handler = async (req, res) => {
       return res.status(400).json({ error: 'Missing prompt or contents' });
     }
 
-    // ─── 1. OPENROUTER FREE OPEN-SOURCE MODELS FLOW ───
+    // ─── 1. OMNIROUTE LOCAL ROUTING FLOW (TOP PRIORITY) ───
+    const omniRouteKey = process.env.OMNIROUTE_API_KEY || process.env.OMNIROUTE_DASHBOARD_KEY;
+    if (omniRouteKey) {
+      const omniRouteUrl = process.env.OMNIROUTE_URL || 'http://localhost:20128/v1/chat/completions';
+      const selectedModel = model || 'auto';
+      console.log(`Processing with OmniRoute local router at ${omniRouteUrl} with model: ${selectedModel}`);
+      
+      const response = await fetch(omniRouteUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${omniRouteKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [
+            { role: "user", content: textPrompt }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OmniRoute Error (${response.status}): ${errorText}`);
+      }
+
+      const responseData = await response.json();
+      const textResult = responseData.choices?.[0]?.message?.content || '';
+      return res.json({ text: textResult });
+    }
+
+    // ─── 2. OPENROUTER FREE OPEN-SOURCE MODELS FLOW ───
     const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OMNIROUTER_API_KEY;
     if (openRouterKey) {
       const selectedModel = model || 'meta-llama/llama-3-8b-instruct:free';
-      console.log(`Processing with OpenRouter/Omnirouter open-source model: ${selectedModel}`);
+      console.log(`Processing with OpenRouter open-source model: ${selectedModel}`);
       
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${openRouterKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://datalens-ai.vercel.app", // Optional referer for OpenRouter analytics
+          "HTTP-Referer": "https://datalens-ai.vercel.app",
           "X-Title": "DataLens AI"
         },
         body: JSON.stringify({
@@ -48,7 +79,7 @@ const handler = async (req, res) => {
           messages: [
             { role: "user", content: textPrompt }
           ],
-          response_format: { type: "json_object" } // Enforce JSON output if model supports it
+          response_format: { type: "json_object" }
         })
       });
 
@@ -62,7 +93,7 @@ const handler = async (req, res) => {
       return res.json({ text: textResult });
     }
 
-    // ─── 2. GEMINI FALLBACK FLOW ───
+    // ─── 3. GEMINI FALLBACK FLOW ───
     if (process.env.GEMINI_API_KEY) {
       const selectedModel = model || 'gemini-2.5-flash';
       console.log(`Processing with Gemini fallback model: ${selectedModel}`);
@@ -76,9 +107,9 @@ const handler = async (req, res) => {
       return res.json({ text: response.text });
     }
 
-    // ─── 3. NO API KEYS CONFIGURED (FORCE LOCAL FALLBACK) ───
+    // ─── 4. NO API KEYS CONFIGURED (FORCE LOCAL FALLBACK) ───
     return res.status(400).json({ 
-      error: 'No AI API keys configured (OPENROUTER_API_KEY, OMNIROUTER_API_KEY, or GEMINI_API_KEY). Triggering local statistical fallback engine.' 
+      error: 'No AI API keys configured (OMNIROUTE_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY). Triggering local statistical fallback engine.' 
     });
 
   } catch (error) {
