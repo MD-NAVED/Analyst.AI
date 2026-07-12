@@ -1118,6 +1118,7 @@ function MainApp() {
   const [history, setHistory] = useState<HistoryOp[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
+  const [expandedChart, setExpandedChart] = useState<any>(null);
 
   // Dashboard Builder States
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
@@ -3628,7 +3629,6 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
 const ChartsSection = () => {
     const numericCols = columns.filter(c => c.type === 'number');
     const isSampledView = chartsIsSampledView;
-    const [expandedChart, setExpandedChart] = useState<any>(null);
 
     if (!data.length) return <div className="text-center mt-20">No data loaded</div>;
     if (numericCols.length === 0) return <div className="text-center mt-20">Numeric columns required for charting.</div>;
