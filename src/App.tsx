@@ -3980,6 +3980,22 @@ const ChartsSection = () => {
                       <Legend verticalAlign="top" wrapperStyle={{paddingBottom: '20px'}} />
                       <Scatter name={`${expandedChart.yAxis} vs ${expandedChart.xAxis}`} data={expandedChart.data} fill="#3B82F6" />
                     </ScatterChart>
+                  ) : expandedChart.type === 'hist' ? (
+                    <BarChart data={expandedChart.data} margin={{top: 20, right: 60, left: 60, bottom: 20}}>
+                      <defs>
+                        <linearGradient id="expHistGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#3B82F6" stopOpacity={1}/>
+                          <stop offset="100%" stopColor="#8B5CF6" stopOpacity={1}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                      <XAxis dataKey="name" tick={{fill: 'var(--text-muted)'}} axisLine={{stroke: '#E2E8F0'}} tickLine={false} />
+                      <YAxis tick={{fill: 'var(--text-muted)'}} axisLine={false} tickLine={false} label={{value: 'Frequency', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 12}} />
+                      <RechartsTooltip content={<CustomTooltip />} cursor={{fill: 'rgba(99,102,241,0.05)'}} />
+                      <Legend verticalAlign="top" wrapperStyle={{paddingBottom: '20px'}} />
+                      <Brush dataKey="name" height={30} stroke="#8B5CF6" fill="rgba(139,92,246,0.1)" />
+                      <Bar name="Frequency" dataKey="count" fill="url(#expHistGradient)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
                   ) : (
                     <div className="flex items-center justify-center h-full text-muted">Detailed view not available for this type.</div>
                   )}
