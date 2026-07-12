@@ -3634,7 +3634,7 @@ const ChartsSection = () => {
     if (numericCols.length === 0) return <div className="text-center mt-20">Numeric columns required for charting.</div>;
 
     return (
-      <div className="fade-in-up stagger-1 flex flex-col h-full">
+      <div className="fade-in-up stagger-1 flex flex-col h-full pb-10">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div>
             <h2>Interactive Visualizations</h2>
