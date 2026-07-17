@@ -15,7 +15,10 @@ import {
   LineChart, Line, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis, AreaChart, Area, Brush
 } from 'recharts';
 import { saveSession, loadSession, clearSession, getStorageEstimate } from './lib/db';
-import { supabase, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut, getSession } from './lib/supabase';
+import { 
+  supabase, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut, getSession,
+  uploadDatasetFile, saveDatasetMeta, listUserDatasets, getDatasetDownloadUrl, deleteDataset, saveChatHistory, loadChatHistory 
+} from './lib/supabase';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import GridLayout, { WidthProvider } from 'react-grid-layout/legacy';
@@ -1062,6 +1065,22 @@ function MainApp() {
     };
   }, []);
 
+  useEffect(() => {
+    const fetchDatasets = async () => {
+      if (currentUser?.id) {
+        try {
+          const list = await listUserDatasets(currentUser.id);
+          setUserDatasets(list);
+        } catch (e) {
+          console.error("Failed to fetch user datasets:", e);
+        }
+      } else {
+        setUserDatasets([]);
+      }
+    };
+    fetchDatasets();
+  }, [currentUser]);
+
   // ─── Supabase Auth Handlers for OnboardingFlow ─────────────────────────
   const handleAuthSubmit = async (
     email: string,
@@ -1111,6 +1130,9 @@ function MainApp() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [expandedChart, setExpandedChart] = useState<any>(null);
+  const [userDatasets, setUserDatasets] = useState<any[]>([]);
+  const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Dashboard Builder States
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
@@ -1170,6 +1192,13 @@ function MainApp() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: '1', role: 'model', content: 'Hi! I am your AI Data Assistant. Ask me anything about your dataset.' }
   ]);
+
+  // Auto-save chat history to Supabase database (Feature B)
+  useEffect(() => {
+    if (currentUser?.id && activeDatasetId && chatMessages.length > 0) {
+      saveChatHistory(currentUser.id, activeDatasetId, chatMessages);
+    }
+  }, [chatMessages, currentUser, activeDatasetId]);
   const [chatInput, setChatInput] = useState('');
   const [chatTyping, setChatTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -2181,7 +2210,53 @@ STRICT RULES:
     );
   };
 
-  const processFile = async (file: File) => {
+  const loadCloudDataset = async (dataset: any) => {
+    if (!currentUser?.id) return;
+    setLoading(true);
+    setParseProgress({ percent: 10, stage: 'Connecting to cloud storage...', rows: 0, elapsed: 0, eta: 0 });
+    try {
+      const downloadUrl = await getDatasetDownloadUrl(dataset.file_path);
+      setParseProgress({ percent: 40, stage: 'Downloading dataset...', rows: 0, elapsed: 0, eta: 0 });
+      const response = await fetch(downloadUrl);
+      if (!response.ok) throw new Error("Failed to download dataset file from storage.");
+      
+      const blob = await response.blob();
+      const fileObj = new File([blob], dataset.name, { type: blob.type || 'text/csv' });
+      
+      setParseProgress({ percent: 70, stage: 'Parsing file contents...', rows: 0, elapsed: 0, eta: 0 });
+      await processFile(fileObj, true, dataset.id);
+    } catch (e: any) {
+      console.error(e);
+      addToast(e.message || "Failed to load cloud dataset", "error");
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteCloudDataset = async (datasetId: string, filePath: string) => {
+    if (!confirm('Are you sure you want to permanently delete this dataset from the cloud?')) return;
+    try {
+      await deleteDataset(datasetId, filePath);
+      addToast("Dataset deleted successfully", "success");
+      // Refresh datasets list
+      if (currentUser?.id) {
+        const list = await listUserDatasets(currentUser.id);
+        setUserDatasets(list);
+      }
+      // If current active dataset was deleted, clear it
+      if (activeDatasetId === datasetId) {
+        setData([]);
+        setColumns([]);
+        setFileInfo(null);
+        setActiveDatasetId(null);
+        setChatMessages([{ id: 'deleted', role: 'model', content: 'Dataset deleted! Please upload a new dataset.' }]);
+      }
+    } catch (e: any) {
+      console.error(e);
+      addToast(`Delete failed: ${e.message}`, "error");
+    }
+  };
+
+  const processFile = async (file: File, isCloudLoaded = false, cloudDatasetId?: string) => {
     if (file.size > 100 * 1024 * 1024) {
       addToast(`File size exceeds the 100MB maximum limit. Selected file size: ${(file.size / (1024 * 1024)).toFixed(2)}MB.`, 'error');
       return;
@@ -2346,9 +2421,55 @@ STRICT RULES:
         type: extension?.toUpperCase() || 'UNKNOWN'
       });
       
-      addToast(`Validated: ${parsedData.length.toLocaleString()} rows, ${keys.length.toLocaleString()} columns, no issues found`, 'success');
-      setActiveTab('preview');
+       addToast(`Validated: ${parsedData.length.toLocaleString()} rows, ${keys.length.toLocaleString()} columns, no issues found`, 'success');
       
+       // Supabase storage & DB persistence if logged in
+      if (currentUser?.id) {
+        if (isCloudLoaded && cloudDatasetId) {
+          setActiveDatasetId(cloudDatasetId);
+          try {
+            updateProgress('Loading chat history...', 95, parsedData.length);
+            const savedChat = await loadChatHistory(currentUser.id, cloudDatasetId);
+            if (savedChat && savedChat.length > 0) {
+              setChatMessages(savedChat);
+            } else {
+              setChatMessages([{ id: 'loaded-cloud', role: 'model', content: 'Dataset loaded! I can answer analytical queries about the data. Ask me anything!' }]);
+            }
+          } catch (chatErr) {
+            console.error("Failed to load chat history:", chatErr);
+            setChatMessages([{ id: 'loaded-cloud-err', role: 'model', content: 'Dataset loaded! I can answer analytical queries about the data. Ask me anything!' }]);
+          }
+        } else {
+          try {
+            updateProgress('Uploading to cloud storage...', 95, parsedData.length);
+            const cloudPath = await uploadDatasetFile(currentUser.id, file);
+            updateProgress('Saving cloud metadata...', 98, parsedData.length);
+            const dbMeta = await saveDatasetMeta({
+              userId: currentUser.id,
+              name: file.name,
+              filePath: cloudPath,
+              rows: parsedData.length,
+              columns: keys.length,
+              sizeBytes: file.size
+            });
+            setActiveDatasetId(dbMeta.id);
+            // Refresh datasets list
+            const list = await listUserDatasets(currentUser.id);
+            setUserDatasets(list);
+            addToast("Dataset saved to your cloud account!", "success");
+            setChatMessages([{ id: 'uploaded-cloud', role: 'model', content: 'Dataset uploaded! I can answer analytical queries about the data. Ask me anything!' }]);
+          } catch (storageErr: any) {
+            console.error("Cloud storage sync failed:", storageErr);
+            addToast(`Synced locally: ${storageErr.message}`, 'warning');
+            setChatMessages([{ id: 'uploaded-cloud-failed', role: 'model', content: 'Dataset loaded locally! I can answer analytical queries about the data. Ask me anything!' }]);
+          }
+        }
+      } else {
+        setActiveDatasetId(null);
+        setChatMessages([{ id: 'loaded-local', role: 'model', content: 'Dataset loaded locally! I can answer analytical queries about the data. Ask me anything!' }]);
+      }
+
+      setActiveTab('preview');
       setTimeout(triggerSaveSession, 100);
       
     } catch (err: any) {
@@ -4903,6 +5024,39 @@ const ChartsSection = () => {
           <div className={`nav-item ${activeTab === 'upload' ? 'active' : ''}`} onClick={() => selectTab('upload')}>
             <Upload size={18} /> Upload Data
           </div>
+
+          {/* Cloud Datasets History List */}
+          {currentUser && userDatasets.length > 0 && (
+             <div className="mt-4 border-t border-[var(--border)] pt-4 px-2">
+                <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2 px-2 flex items-center gap-1.5 opacity-60">
+                   <Database size={11} /> Your Cloud Datasets
+                </div>
+                <div className="flex flex-col gap-1 max-h-[180px] overflow-y-auto hidden-scrollbar">
+                   {userDatasets.map((ds) => (
+                      <div 
+                         key={ds.id} 
+                         className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer hover:bg-[var(--surface-raised)] group ${activeDatasetId === ds.id ? 'bg-[var(--primary-subtle)] text-[var(--primary)] font-semibold border border-[var(--primary-border)]' : 'text-[var(--text-primary)]'}`}
+                         onClick={() => loadCloudDataset(ds)}
+                      >
+                         <div className="flex items-center gap-2 truncate flex-1 pr-1.5">
+                            <FileSpreadsheet size={13} className="shrink-0 text-slate-400" />
+                            <span className="truncate" title={ds.name}>{ds.name}</span>
+                         </div>
+                         <button 
+                            className="text-slate-400 hover:text-[var(--danger)] p-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center rounded border-none bg-transparent"
+                            onClick={(e) => {
+                               e.stopPropagation();
+                               handleDeleteCloudDataset(ds.id, ds.file_path);
+                            }}
+                            title="Delete dataset"
+                         >
+                            <Trash2 size={12} />
+                         </button>
+                      </div>
+                   ))}
+                </div>
+             </div>
+          )}
           
           {data.length > 0 && (
             <>
