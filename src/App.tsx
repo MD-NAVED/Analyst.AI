@@ -2413,7 +2413,7 @@ STRICT RULES:
               borderColor: '#C4B5FD',
             }}
           >
-            <div className="flex items-center gap-4 w-full sm:w-auto">
+            <div className="flex items-center gap-4 w-full sm:flex-1">
               <div className="flex-shrink-0 w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
                 <span style={{ fontSize: 20 }}>📊</span>
               </div>
