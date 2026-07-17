@@ -2392,7 +2392,7 @@ STRICT RULES:
       : currentUser?.name || '';
 
     return (
-      <div className="fade-in-up stagger-1 h-full flex flex-col max-w-6xl mx-auto w-full px-4 py-8">
+      <div className="fade-in-up stagger-1 min-h-full flex flex-col max-w-6xl mx-auto w-full px-4 pt-4 pb-16">
         {/* ── Personalized Greeting (Mixpanel style) ── */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>

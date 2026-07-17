@@ -331,6 +331,14 @@ h4 {
   gap: 20px;
 }
 
+.content-area::after {
+  content: '';
+  display: block;
+  height: 48px; /* Acts as a global bottom spacer to prevent clipping/touching */
+  flex-shrink: 0;
+  width: 100%;
+}
+
 /* =========================================================
    CARD COMPONENTS
    ========================================================= */
