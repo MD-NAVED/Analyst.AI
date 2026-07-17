@@ -3613,6 +3613,31 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
     }));
   }, [xAxis, yAxis, type, sampledData, columns]);
 
+  // Live Mini Stats Bar calculations (Option 2)
+  const stats = useMemo(() => {
+    const values = data.map(d => Number(d[yAxis])).filter(n => !isNaN(n));
+    if (!values.length) return null;
+    const sum = values.reduce((acc, v) => acc + v, 0);
+    const avg = sum / values.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    
+    const formatNum = (num: number) => {
+      if (num >= 1e9) return `${(num / 1e9).toFixed(1)}B`;
+      if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`;
+      if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`;
+      return num.toFixed(1);
+    };
+
+    return {
+      sum: formatNum(sum),
+      avg: formatNum(avg),
+      min: formatNum(min),
+      max: formatNum(max),
+      count: values.length.toLocaleString()
+    };
+  }, [data, yAxis]);
+
   return (
     <div className="premium-card flex flex-col" id={id} style={{height: 450}}>
       <div className="flex justify-between items-start mb-4">
@@ -3623,6 +3648,17 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
             onChange={e => setChartTitle(e.target.value)}
             className="bg-transparent border-b border-transparent focus:border-[var(--primary)] outline-none font-semibold text-lg max-w-[200px]"
           />
+          {stats && (
+            <div className="text-[10.5px] text-[var(--text-muted)] font-mono mt-1 flex gap-2 flex-wrap items-center leading-none">
+              <span>Sum: <strong className="text-[var(--text-primary)]">{stats.sum}</strong></span>
+              <span className="opacity-30">|</span>
+              <span>Avg: <strong className="text-[var(--text-primary)]">{stats.avg}</strong></span>
+              <span className="opacity-30">|</span>
+              <span>Max: <strong className="text-[var(--text-primary)]">{stats.max}</strong></span>
+              <span className="opacity-30">|</span>
+              <span>Rows: <strong className="text-[var(--text-primary)]">{stats.count}</strong></span>
+            </div>
+          )}
           {isSampled && (
             <span className="text-[10px] text-teal-400 font-mono mt-1 bg-teal-400/10 inline-block px-2 py-0.5 rounded w-max">
               Sampling indicator: Showing {sampledData.length.toLocaleString()} of {totalRows.toLocaleString()} rows
