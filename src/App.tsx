@@ -2405,24 +2405,25 @@ STRICT RULES:
           )}
         </div>
 
-        {/* ── Setup Banner (Mixpanel "Continue Setup" style) ── */}
         {!fileInfo && (
           <div
-            className="flex items-center gap-4 rounded-2xl px-5 py-4 mb-6 border"
+            className="flex flex-col sm:flex-row sm:items-center gap-4 rounded-2xl px-5 py-4 mb-6 border"
             style={{
               background: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
               borderColor: '#C4B5FD',
             }}
           >
-            <div className="flex-shrink-0 w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
-              <span style={{ fontSize: 20 }}>📊</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm" style={{ color: '#1E1B4B' }}>Unlock the power of your data</p>
-              <p className="text-xs mt-0.5" style={{ color: '#6D28D9' }}>Upload your first dataset to get started with AI-powered analysis</p>
+            <div className="flex items-center gap-4 w-full sm:w-auto">
+              <div className="flex-shrink-0 w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                <span style={{ fontSize: 20 }}>📊</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm" style={{ color: '#1E1B4B' }}>Unlock the power of your data</p>
+                <p className="text-xs mt-0.5" style={{ color: '#6D28D9' }}>Upload your first dataset to get started with AI-powered analysis</p>
+              </div>
             </div>
             <label
-              className="flex-shrink-0 px-4 py-2 rounded-full text-white text-sm font-semibold cursor-pointer transition-all duration-200 hover:opacity-90"
+              className="flex-shrink-0 px-5 py-2.5 rounded-full text-white text-sm font-semibold cursor-pointer transition-all duration-200 hover:opacity-90 text-center w-full sm:w-auto mt-2 sm:mt-0"
               style={{ background: '#7C3AED' }}
             >
               <input type="file" className="hidden" accept=".csv,.xlsx,.xls,.json" onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0]); }} />
