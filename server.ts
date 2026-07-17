@@ -430,7 +430,7 @@ app.post('/api/gemini', authenticateToken, async (req, res) => {
           headers: {
             "Authorization": `Bearer ${openRouterKey}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://datalens-ai.vercel.app",
+            "HTTP-Referer": "https://data-lens-ai-omega.vercel.app",
             "X-Title": "DataLens AI"
           },
           body: JSON.stringify({
@@ -539,7 +539,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
           headers: {
             "Authorization": `Bearer ${openRouterKey}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://datalens-ai.vercel.app",
+            "HTTP-Referer": "https://data-lens-ai-omega.vercel.app",
             "X-Title": "DataLens AI"
           },
           body: JSON.stringify({

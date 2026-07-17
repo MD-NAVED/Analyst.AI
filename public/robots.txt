@@ -3,4 +3,4 @@ User-agent: *
 Allow: /
 
 # Sitemaps
-Sitemap: https://datalens-ai.vercel.app/sitemap.xml
+Sitemap: https://data-lens-ai-omega.vercel.app/sitemap.xml
