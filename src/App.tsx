@@ -3,7 +3,7 @@ import {
   Upload, FileSpreadsheet, FileJson, FileText, X, AlertCircle, CheckCircle,
   Search, Filter, BarChart2, PieChart as PieChartIcon, LineChart as LineChartIcon,
   ScatterChart as ScatterChartIcon, Activity, Download, Hash, Type, Calendar, 
-  ChevronRight, ChevronLeft, ArrowUpRight, ArrowDownRight, Menu, LayoutDashboard, Database,
+  ChevronRight, ChevronLeft, ChevronDown, ArrowUpRight, ArrowDownRight, Menu, LayoutDashboard, Database,
   MessageSquare, Sparkles, Wand2, RefreshCcw, Save, Trash2, ArrowRight, FileOutput, Send,
   Terminal, Component, Workflow, Zap, Network, Clock, Settings, Plus, Play, TrendingUp,
   AlertTriangle, Copy, RotateCcw
@@ -2362,6 +2362,8 @@ STRICT RULES:
   };
 
   const UploadSection = () => {
+    const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+
     const handleDragOver = (e: React.DragEvent) => {
       e.preventDefault();
       setUploadIsDragging(true);
@@ -2482,6 +2484,48 @@ STRICT RULES:
                   <span className="bg-emerald-50 text-emerald-600 border-emerald-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">JSON</span>
                 </div>
               </label>
+
+              {/* Collapsible Advanced settings for Option A */}
+              <div className="mt-4 border-t border-[var(--border)] pt-4">
+                <button 
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                  className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--primary)] transition-colors cursor-pointer"
+                >
+                  <Settings size={14} className={showAdvancedSettings ? 'animate-spin' : ''} />
+                  <span>Advanced Ingestion Settings</span>
+                  <ChevronDown size={14} style={{ transform: showAdvancedSettings ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                </button>
+
+                {showAdvancedSettings && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] fade-in">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">CSV Delimiter</label>
+                      <CustomSelect 
+                        value={csvDelimiter} 
+                        onChange={setCsvDelimiter} 
+                        options={[
+                          { value: 'auto', label: 'Auto-detect' },
+                          { value: ',', label: 'Comma ( , )' },
+                          { value: ';', label: 'Semicolon ( ; )' },
+                          { value: '\t', label: 'Tab ( \\t )' }
+                        ]}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Parser Constraints</label>
+                      <label className="flex items-center gap-2.5 cursor-pointer bg-white border border-[var(--border)] px-3 rounded-xl hover:border-[var(--primary)] transition-colors w-full min-h-[38px] text-xs shadow-sm">
+                        <input 
+                          type="checkbox" 
+                          checked={strictMode}
+                          onChange={(e) => setStrictMode(e.target.checked)}
+                          className="accent-blue-600 w-4 h-4 cursor-pointer align-middle rounded"
+                        />
+                        <span className="text-[11px] text-[var(--text-primary)] font-semibold leading-none">Strict Mode (skip null rows)</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
