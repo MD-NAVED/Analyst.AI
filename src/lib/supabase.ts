@@ -5,11 +5,11 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 console.log('⚡ [DataLens DB] Connecting to Supabase URL:', supabaseUrl || 'MISSING');
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('⚠️ Supabase credentials missing in .env — auth and storage will not work.');
-}
+// Prevent hard crash if env variables are not set (e.g., during Vercel build before setting env vars)
+const safeUrl = supabaseUrl && supabaseUrl.trim() !== "" ? supabaseUrl : 'https://placeholder.supabase.co';
+const safeKey = supabaseAnonKey && supabaseAnonKey.trim() !== "" ? supabaseAnonKey : 'placeholder';
 
-export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
+export const supabase = createClient(safeUrl, safeKey);
 
 // ─── AUTH HELPERS ─────────────────────────────────────────────────────────────
 
