@@ -15,6 +15,7 @@ import {
   LineChart, Line, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis, AreaChart, Area, Brush
 } from 'recharts';
 import { saveSession, loadSession, clearSession, getStorageEstimate } from './lib/db';
+import { supabase, signUpWithEmail, signInWithEmail, signInWithGoogle, signOut, getSession } from './lib/supabase';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import GridLayout, { WidthProvider } from 'react-grid-layout/legacy';
@@ -1010,132 +1011,94 @@ function MainApp() {
   };
   
   useEffect(() => {
+    // 1. Check current session on load
     const checkUser = async () => {
-      const token = localStorage.getItem('datalens_auth_token');
-      if (token) {
-        try {
-          const response = await fetch('/api/auth/me', {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
+      try {
+        const user = await getSession();
+        if (user) {
+          // Fetch profile info for name
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('name')
+            .eq('id', user.id)
+            .single();
+          
+          setCurrentUser({
+            id: user.id,
+            email: user.email,
+            name: profile?.name || user.email?.split('@')[0] || 'User'
           });
-          if (response.ok) {
-            const data = await response.json();
-            setCurrentUser(data.user);
-          } else {
-            localStorage.removeItem('datalens_auth_token');
-          }
-        } catch (e) {
-          console.error("Failed to verify user session", e);
         }
+      } catch (e) {
+        console.error("Failed to verify user session", e);
+      } finally {
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     };
     checkUser();
+
+    // 2. Listen for auth changes (login/logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('name')
+          .eq('id', session.user.id)
+          .single();
+
+        setCurrentUser({
+          id: session.user.id,
+          email: session.user.email,
+          name: profile?.name || session.user.email?.split('@')[0] || 'User'
+        });
+      } else {
+        setCurrentUser(null);
+      }
+      setAuthLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  useEffect(() => {
-    const handleGoogleHash = async () => {
-      if (window.location.hash) {
-        const hash = window.location.hash.substring(1);
-        const params = new URLSearchParams(hash);
-        const accessToken = params.get('access_token');
-        if (accessToken) {
-          // Clean the hash from address bar
-          window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
-          
-          setAuthLoading(true);
-          try {
-            const brandId = config?.client?.id || 'datalens-default';
-            const response = await fetch('/api/auth/google-login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ accessToken, brandId })
-            });
-            
-            let data: any = {};
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-              data = await response.json();
-            } else {
-              const text = await response.text();
-              throw new Error(text || `Server returned status ${response.status}`);
-            }
-            
-            if (response.ok) {
-              localStorage.setItem('datalens_auth_token', data.token);
-              setCurrentUser(data.user);
-            } else {
-              console.error("Google authentication failed:", data.error);
-            }
-          } catch (e) {
-            console.error("Error exchanging Google access token:", e);
-          } finally {
-            setAuthLoading(false);
-          }
-        }
-      }
-    };
-    handleGoogleHash();
-  }, [config]);
-
-  // ─── Standalone auth handlers for OnboardingFlow ─────────────────────────
+  // ─── Supabase Auth Handlers for OnboardingFlow ─────────────────────────
   const handleAuthSubmit = async (
     email: string,
     password: string,
     name: string,
     isRegister: boolean
   ): Promise<any> => {
-    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-    const payload = isRegister
-      ? { email, password, name, brandId: config?.client?.id }
-      : { email, password, brandId: config?.client?.id };
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const contentType = response.headers.get('content-type');
-    let data: any = {};
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
+    if (isRegister) {
+      const user = await signUpWithEmail(email, password, name);
+      return {
+        id: user?.id,
+        email: user?.email,
+        name
+      };
     } else {
-      const text = await response.text();
-      throw new Error(text || `Server returned status ${response.status}`);
+      const user = await signInWithEmail(email, password);
+      // Fetch profile info for display name
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', user?.id)
+        .single();
+
+      return {
+        id: user?.id,
+        email: user?.email,
+        name: profile?.name || user?.email?.split('@')[0] || 'User'
+      };
     }
-    if (!response.ok) throw new Error(data.error || 'Authentication failed.');
-    localStorage.setItem('datalens_auth_token', data.token);
-    return data.user;
   };
 
   const handleSocialAuthSubmit = async (provider: string): Promise<any> => {
     if (provider === 'Google') {
-      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-      if (clientId && clientId.trim() !== '' && !clientId.includes('your_google_client_id')) {
-        const redirectUri = window.location.origin + window.location.pathname;
-        const scope = 'email profile';
-        const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}`;
-        window.location.href = googleAuthUrl;
-        return {};
-      } else {
-        throw new Error('Google Client ID is not configured. Please set VITE_GOOGLE_CLIENT_ID.');
-      }
+      await signInWithGoogle();
+      return {};
     }
-    const response = await fetch('/api/auth/social-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, brandId: config?.client?.id }),
-    });
-    const contentType = response.headers.get('content-type');
-    let data: any = {};
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      throw new Error(`Server returned status ${response.status}`);
-    }
-    if (!response.ok) throw new Error(data.error || 'Authentication failed.');
-    localStorage.setItem('datalens_auth_token', data.token);
-    return data.user;
+    throw new Error(`Social auth provider ${provider} not implemented.`);
   };
 
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'eda' | 'chat' | 'dashboard' | 'auto-analyst'>('upload');
@@ -4971,7 +4934,7 @@ const ChartsSection = () => {
               onClick={async () => {
                 if (confirm('Clear all saved session data? This cannot be undone.')) {
                   await clearSession();
-                  localStorage.removeItem('datalens_auth_token');
+                  await signOut();
                   window.location.reload();
                 }
               }}
@@ -4980,8 +4943,8 @@ const ChartsSection = () => {
             </button>
             <button 
               className="btn-secondary w-full text-xs justify-center gap-1.5 border-[var(--border)] hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--danger)] hover:border-[var(--danger)] cursor-pointer" 
-              onClick={() => {
-                localStorage.removeItem('datalens_auth_token');
+              onClick={async () => {
+                await signOut();
                 window.location.reload();
               }}
             >
