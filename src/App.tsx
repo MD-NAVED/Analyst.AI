@@ -2485,87 +2485,50 @@ STRICT RULES:
             </div>
           </div>
 
-          {/* Card 2: System Status (5 cols) */}
-          <div className="lg:col-span-5 card p-6 flex flex-col justify-between">
-            <div>
-              <h3 className="text-base font-semibold mb-4 text-[var(--text-primary)] flex items-center gap-2">
-                <Zap size={16} className="text-[var(--primary)]" /> System Status
-              </h3>
-              <div className="flex flex-col gap-0 font-mono text-xs">
-                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
-                  <span className="text-[var(--text-muted)]">Core Engine</span>
-                  <span className="text-[var(--success)] flex items-center gap-1.5 font-bold"><span className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse"></span> ONLINE</span>
-                </div>
-                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
-                  <span className="text-[var(--text-muted)]">AI Proxy</span>
-                  <span className="text-[var(--success)] font-bold">CONNECTED</span>
-                </div>
-                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
-                  <span className="text-[var(--text-muted)]">Memory Allocation</span>
-                  <span className="text-[var(--text-primary)] font-semibold">OPTIMIZED</span>
-                </div>
-                <div className="flex justify-between items-center py-2.5 border-b border-[var(--border)]">
-                  <span className="text-[var(--text-muted)]">CORS Policy</span>
-                  <span className="text-[var(--text-primary)] font-semibold">DYNAMIC</span>
-                </div>
-                <div className="flex justify-between items-center py-2.5">
-                  <span className="text-[var(--text-muted)]">Security Ingestion</span>
-                  <span className="text-[var(--success)] font-bold">ACTIVE</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: Advanced Parser Settings (7 cols) */}
-          <div className="lg:col-span-7 card p-6 flex flex-col justify-between">
-            <div>
-              <h3 className="text-base font-semibold mb-4 text-[var(--text-primary)] flex items-center gap-2">
-                <Settings size={16} className="text-[var(--primary)]" /> Advanced Parser Settings
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">CSV Delimiter</label>
-                  <CustomSelect 
-                    value={csvDelimiter} 
-                    onChange={setCsvDelimiter} 
-                    options={[
-                      { value: 'auto', label: 'Auto-detect Delimiter' },
-                      { value: ',', label: 'Comma ( , )' },
-                      { value: ';', label: 'Semicolon ( ; )' },
-                      { value: '\t', label: 'Tab ( \\t )' }
-                    ]}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Parser Constraints</label>
-                  <label className="flex items-center gap-2.5 cursor-pointer bg-[var(--surface-raised)] border border-[var(--border)] px-3.5 rounded-xl hover:border-[var(--primary)] transition-colors w-full min-h-[40px] text-xs shadow-sm">
-                    <input 
-                      type="checkbox" 
-                      checked={strictMode}
-                      onChange={(e) => setStrictMode(e.target.checked)}
-                      className="accent-blue-600 w-4 h-4 cursor-pointer align-middle rounded"
-                    />
-                    <span className="text-xs text-[var(--text-primary)] font-semibold leading-none">Strict Mode (skip null rows)</span>
-                  </label>
+          {/* Right Column: Stacked System Status & Demo sandbox (5 cols) */}
+          <div className="lg:col-span-5 flex flex-col gap-6">
+            {/* Card 2: System Status */}
+            <div className="card p-6 flex-1 flex flex-col justify-between">
+              <div>
+                <h3 className="text-base font-semibold mb-4 text-[var(--text-primary)] flex items-center gap-2">
+                  <Zap size={16} className="text-[var(--primary)]" /> System Status
+                </h3>
+                <div className="flex flex-col gap-0 font-mono text-xs">
+                  <div className="flex justify-between items-center py-2 border-b border-[var(--border)]">
+                    <span className="text-[var(--text-muted)]">Core Engine</span>
+                    <span className="text-[var(--success)] flex items-center gap-1.5 font-bold"><span className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse"></span> ONLINE</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-[var(--border)]">
+                    <span className="text-[var(--text-muted)]">AI Proxy</span>
+                    <span className="text-[var(--success)] font-bold">CONNECTED</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-[var(--border)]">
+                    <span className="text-[var(--text-muted)]">Memory Allocation</span>
+                    <span className="text-[var(--text-primary)] font-semibold">OPTIMIZED</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-[var(--text-muted)]">CORS Policy</span>
+                    <span className="text-[var(--text-primary)] font-semibold">DYNAMIC</span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Card 4: Load Demo Environment (5 cols) */}
-          <div className="lg:col-span-5 card p-6 flex flex-col justify-between">
-            <div>
-              <h3 className="text-base font-semibold mb-3 text-[var(--text-primary)] flex items-center gap-2">
-                <Sparkles size={16} className="text-[var(--primary)]" /> Load Demo Environment
-              </h3>
-              <p className="text-xs text-[var(--text-secondary)] mb-4 leading-relaxed">Don't have a dataset ready? Load our pre-configured sales sandbox instantly to explore charts and insights.</p>
+            {/* Card 3: Load Demo Environment */}
+            <div className="card p-6 flex-1 flex flex-col justify-between">
+              <div>
+                <h3 className="text-base font-semibold mb-3 text-[var(--text-primary)] flex items-center gap-2">
+                  <Sparkles size={16} className="text-[var(--primary)]" /> Load Demo Environment
+                </h3>
+                <p className="text-xs text-[var(--text-secondary)] mb-4 leading-relaxed">Don't have a dataset ready? Load our pre-configured sales sandbox instantly to explore charts and insights.</p>
+              </div>
+              <button 
+                onClick={loadSampleSalesDataset}
+                className="btn-primary w-full justify-center py-2.5 px-4 text-xs cursor-pointer"
+              >
+                <Sparkles size={14} /> Ingest Sample Sales Data
+              </button>
             </div>
-            <button 
-              onClick={loadSampleSalesDataset}
-              className="btn-primary w-full justify-center py-2.5 px-4 text-xs cursor-pointer"
-            >
-              <Sparkles size={14} /> Ingest Sample Sales Data
-            </button>
           </div>
         </div>
 
