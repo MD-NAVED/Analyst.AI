@@ -1102,6 +1102,7 @@ function MainApp() {
   };
 
   const [activeTab, setActiveTab] = useState<'upload' | 'preview' | 'stats' | 'charts' | 'cleaning' | 'eda' | 'chat' | 'dashboard' | 'auto-analyst'>('upload');
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
   const [data, setData] = useState<any[]>([]);
   const [initialData, setInitialData] = useState<any[]>([]);
@@ -2362,8 +2363,6 @@ STRICT RULES:
   };
 
   const UploadSection = () => {
-    const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
-
     const handleDragOver = (e: React.DragEvent) => {
       e.preventDefault();
       setUploadIsDragging(true);
