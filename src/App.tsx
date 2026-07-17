@@ -2457,7 +2457,7 @@ STRICT RULES:
           <p className="text-[var(--text-muted)] text-sm">Upload datasets, configure ingestion rules, or load demo environments.</p>
         </div>
         
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Card 1: Ingestion Controls (7 cols) */}
           <div className="lg:col-span-7 card p-6 flex flex-col justify-between">
             <div>
