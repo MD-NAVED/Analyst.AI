@@ -3636,17 +3636,11 @@ const ChartWidget = ({ title, type, id, data, columns, isSampledView, isExportin
         </div>
         <div className="flex gap-1">
           {onExpand && (
-            <button className="btn-icon mr-2" title="Expand Chart" onClick={() => onExpand({ title: chartTitle, type, xAxis, yAxis, data: chartData })}>
+            <button className="btn-icon" title="Expand Chart" onClick={() => onExpand({ title: chartTitle, type, xAxis, yAxis, data: chartData })}>
               <span className="text-[10px] font-mono font-bold mr-1 opacity-70">ZOOM</span> 
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
             </button>
           )}
-          <button className="btn-icon" title="Download SVG" onClick={() => downloadChart(id, chartTitle, 'svg', fileInfo, addToast)}>
-            <span className="text-[10px] font-mono font-bold mr-1 opacity-70">SVG</span> <Download size={14} />
-          </button>
-          <button className="btn-icon" title="Download PNG" onClick={() => downloadChart(id, chartTitle, 'png', fileInfo, addToast)}>
-            <span className="text-[10px] font-mono font-bold mr-1 opacity-70">PNG</span> <Download size={14} />
-          </button>
         </div>
       </div>
       <div className="flex gap-2 mb-4">
