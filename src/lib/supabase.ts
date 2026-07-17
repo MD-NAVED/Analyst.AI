@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
+console.log('⚡ [DataLens DB] Connecting to Supabase URL:', supabaseUrl || 'MISSING');
+
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('⚠️ Supabase credentials missing in .env — auth and storage will not work.');
 }
