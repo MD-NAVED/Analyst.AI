@@ -8,8 +8,14 @@ import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 import crypto from 'crypto';
 
+import { createClient } from '@supabase/supabase-js';
+
 dotenv.config({ path: '.env.local' });
 dotenv.config();
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const _dirname = typeof __filename !== 'undefined'
   ? path.dirname(__filename)
@@ -161,8 +167,8 @@ function verifyToken(token: string): any | null {
   }
 }
 
-// Auth token verification middleware
-function authenticateToken(req: any, res: any, next: any) {
+// Auth token verification middleware using Supabase
+async function authenticateToken(req: any, res: any, next: any) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -170,13 +176,16 @@ function authenticateToken(req: any, res: any, next: any) {
     return res.status(401).json({ error: 'Access Denied: Missing authentication token.' });
   }
 
-  const user = verifyToken(token);
-  if (!user) {
-    return res.status(401).json({ error: 'Access Denied: Invalid or expired authentication token.' });
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return res.status(401).json({ error: 'Access Denied: Invalid or expired authentication token.' });
+    }
+    req.user = user;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Access Denied: Token verification failed.' });
   }
-
-  req.user = user;
-  next();
 }
 
 // Auth Routes
@@ -480,7 +489,7 @@ app.post('/api/gemini', authenticateToken, async (req, res) => {
 
   } catch (error: any) {
     console.error('API Analyze internal error:', error);
-    res.status(500).json({ error: error.message || 'Failed to analyze data.' });
+    res.status(500).json({ error: 'An internal server error occurred while analyzing the dataset.' });
   }
 });
 
@@ -596,7 +605,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
 
   } catch (error: any) {
     console.error('API Chat internal error:', error);
-    res.status(500).json({ error: error.message || 'Failed to process chat conversation.' });
+    res.status(500).json({ error: 'An internal server error occurred while processing the chat conversation.' });
   }
 });
 

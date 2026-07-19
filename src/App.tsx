@@ -369,7 +369,8 @@ ${numericCols.length} numerical fields and ${categoricalCols.length} categorical
 const CHART_COLORS = ['#3B82F6', '#8B5CF6', '#22C55E', '#F59E0B', '#EC4899', '#14B8A6', '#F97316'];
 
 const callAI = async (payload: { contents?: any, prompt?: string, model?: string }) => {
-  const token = localStorage.getItem('datalens_auth_token');
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
