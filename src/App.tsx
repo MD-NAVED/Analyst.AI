@@ -3761,8 +3761,21 @@ STRICT RULES:
 
                         {msg.aiChartData && msg.aiChartConfig && (
                            (() => {
-                              const xAxisKey = msg.aiChartConfig.xAxis || (msg.aiChartConfig as any).category || (msg.aiChartConfig as any).key || '';
-                              const yAxisKey = msg.aiChartConfig.yAxis || (msg.aiChartConfig as any).value || '';
+                              const xAxisKey = msg.aiChartConfig.xAxis || 
+                                               (msg.aiChartConfig as any).category || 
+                                               (msg.aiChartConfig as any).key || 
+                                               (msg.aiChartConfig as any).name || 
+                                               (msg.aiChartConfig as any).color || 
+                                               (msg.aiChartConfig as any).label || 
+                                               (msg.aiChartConfig as any).x || 
+                                               '';
+                              const yAxisKey = msg.aiChartConfig.yAxis || 
+                                               (msg.aiChartConfig as any).value || 
+                                               (msg.aiChartConfig as any).angle || 
+                                               (msg.aiChartConfig as any).y || 
+                                               (msg.aiChartConfig as any).amount || 
+                                               (msg.aiChartConfig as any).count || 
+                                               '';
                               return (
                                  <div className="mt-4 p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 shadow-lg flex flex-col gap-3">
                                     <div className="flex justify-between items-center">
