@@ -210,6 +210,14 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   content: string;
+  aiChartData?: any[];
+  aiChartConfig?: {
+    type: 'bar' | 'line' | 'pie' | 'scatter' | 'area';
+    xAxis: string;
+    yAxis: string;
+    title: string;
+  };
+  aiCode?: string;
 }
 
 // --- UTILS ---
@@ -2485,6 +2493,82 @@ STRICT RULES:
   };
 
   const UploadSection = () => {
+    const [ingestionMode, setIngestionMode] = useState<'file' | 'sheets' | 'database'>('file');
+    const [sheetsUrl, setSheetsUrl] = useState('');
+    const [dbConfig, setDbConfig] = useState({
+      type: 'postgres',
+      host: '',
+      port: 5432,
+      user: '',
+      password: '',
+      database: '',
+      query: 'SELECT * FROM your_table LIMIT 1000'
+    });
+
+    const loadGoogleSheet = async () => {
+      if (!sheetsUrl.trim()) {
+        addToast("Please enter a valid Google Sheets URL.", "warning");
+        return;
+      }
+      setLoading(true);
+      try {
+        const match = sheetsUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        if (!match) throw new Error("Invalid URL. Make sure it contains the Google spreadsheet ID.");
+        const sheetId = match[1];
+        const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+
+        const res = await fetch(exportUrl);
+        if (!res.ok) throw new Error("Failed to load Google Sheet. Confirm sheet sharing is set to 'Anyone with the link can view'.");
+
+        const csvText = await res.text();
+        const blob = new Blob([csvText], { type: 'text/csv' });
+        const fileObj = new File([blob], "google_sheet.csv", { type: 'text/csv' });
+        await processFile(fileObj);
+        addToast("Successfully loaded Google Sheet dataset!", "success");
+      } catch (e: any) {
+        console.error(e);
+        addToast(e.message || "Failed to load Google Sheet", "error");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const loadDatabaseDataset = async () => {
+      if (!dbConfig.host || !dbConfig.database || !dbConfig.user || !dbConfig.password || !dbConfig.query) {
+        addToast("Please fill in all database connection parameters and SQL query.", "warning");
+        return;
+      }
+      setLoading(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch('/api/import/db', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token || ''}`
+          },
+          body: JSON.stringify(dbConfig)
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || "Failed to query database.");
+
+        if (!result.rows || result.rows.length === 0) {
+          throw new Error("Query executed successfully, but returned zero rows.");
+        }
+
+        const csvString = Papa.unparse(result.rows);
+        const blob = new Blob([csvString], { type: 'text/csv' });
+        const fileObj = new File([blob], `${dbConfig.database}_query.csv`, { type: 'text/csv' });
+        await processFile(fileObj);
+        addToast(`Successfully imported ${result.rows.length.toLocaleString()} rows from database!`, 'success');
+      } catch (e: any) {
+        console.error(e);
+        addToast(e.message || "Database connection failed", "error");
+      } finally {
+        setLoading(false);
+      }
+    };
+
     const handleDragOver = (e: React.DragEvent) => {
       e.preventDefault();
       setUploadIsDragging(true);
@@ -2583,70 +2667,219 @@ STRICT RULES:
           {/* Card 1: Ingestion Controls (7 cols) */}
           <div className="lg:col-span-7 card p-6 flex flex-col justify-between">
             <div>
-              <h3 className="text-base font-semibold mb-4 text-[var(--primary)] flex items-center gap-2">
-                <Upload size={16} /> File Ingestion Dropzone
-              </h3>
-              <label 
-                className={`drop-zone ${uploadIsDragging ? 'active' : ''}`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <input type="file" className="hidden" accept=".csv,.xlsx,.xls,.json" onChange={handleFileChange} />
-                <div className="upload-icon-container">
-                  <Upload size={24} />
-                </div>
-                <h4 className="text-sm font-semibold mb-1">Click or drag file to this area</h4>
-                <p className="text-xs text-[var(--text-muted)] text-center mb-4">Max file size 100MB. Supports CSV, XLSX, JSON format.</p>
-                
-                <div className="flex gap-3">
-                  <span className="bg-blue-50 text-blue-600 border-blue-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">CSV</span>
-                  <span className="bg-purple-50 text-purple-600 border-purple-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">XLSX</span>
-                  <span className="bg-emerald-50 text-emerald-600 border-emerald-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">JSON</span>
-                </div>
-              </label>
-
-              {/* Collapsible Advanced settings for Option A */}
-              <div className="mt-4 border-t border-[var(--border)] pt-4">
+              {/* Tab Selector */}
+              <div className="flex border-b border-[var(--border)] mb-4">
                 <button 
-                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-                  className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--primary)] transition-colors cursor-pointer"
+                  onClick={() => setIngestionMode('file')}
+                  className={`pb-2.5 px-4 font-semibold text-xs border-b-2 cursor-pointer transition-all ${ingestionMode === 'file' ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                 >
-                  <Settings size={14} className={showAdvancedSettings ? 'animate-spin' : ''} />
-                  <span>Advanced Ingestion Settings</span>
-                  <ChevronDown size={14} style={{ transform: showAdvancedSettings ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                  📁 File Ingestion
                 </button>
+                <button 
+                  onClick={() => setIngestionMode('sheets')}
+                  className={`pb-2.5 px-4 font-semibold text-xs border-b-2 cursor-pointer transition-all ${ingestionMode === 'sheets' ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                >
+                  🟢 Google Sheets
+                </button>
+                <button 
+                  onClick={() => setIngestionMode('database')}
+                  className={`pb-2.5 px-4 font-semibold text-xs border-b-2 cursor-pointer transition-all ${ingestionMode === 'database' ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                >
+                  🛢️ SQL Databases
+                </button>
+              </div>
 
-                {showAdvancedSettings && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] fade-in">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">CSV Delimiter</label>
-                      <CustomSelect 
-                        value={csvDelimiter} 
-                        onChange={setCsvDelimiter} 
-                        options={[
-                          { value: 'auto', label: 'Auto-detect' },
-                          { value: ',', label: 'Comma ( , )' },
-                          { value: ';', label: 'Semicolon ( ; )' },
-                          { value: '\t', label: 'Tab ( \\t )' }
-                        ]}
-                      />
+              {/* Ingestion Mode: File Dropzone */}
+              {ingestionMode === 'file' && (
+                <div>
+                  <label 
+                    className={`drop-zone ${uploadIsDragging ? 'active' : ''}`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
+                    <input type="file" className="hidden" accept=".csv,.xlsx,.xls,.json" onChange={handleFileChange} />
+                    <div className="upload-icon-container">
+                      <Upload size={24} />
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Parser Constraints</label>
-                      <label className="flex items-center gap-2.5 cursor-pointer bg-white border border-[var(--border)] px-3 rounded-xl hover:border-[var(--primary)] transition-colors w-full min-h-[38px] text-xs shadow-sm">
+                    <h4 className="text-sm font-semibold mb-1">Click or drag file to this area</h4>
+                    <p className="text-xs text-[var(--text-muted)] text-center mb-4">Max file size 100MB. Supports CSV, XLSX, JSON format.</p>
+                    
+                    <div className="flex gap-3">
+                      <span className="bg-blue-50 text-blue-600 border-blue-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">CSV</span>
+                      <span className="bg-purple-50 text-purple-600 border-purple-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">XLSX</span>
+                      <span className="bg-emerald-50 text-emerald-600 border-emerald-200 font-mono text-[10px] font-semibold px-3 py-1 rounded-full border">JSON</span>
+                    </div>
+                  </label>
+
+                  {/* Collapsible Advanced settings */}
+                  <div className="mt-4 border-t border-[var(--border)] pt-4">
+                    <button 
+                      onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                      className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--primary)] transition-colors cursor-pointer"
+                    >
+                      <Settings size={14} className={showAdvancedSettings ? 'animate-spin' : ''} />
+                      <span>Advanced Ingestion Settings</span>
+                      <ChevronDown size={14} style={{ transform: showAdvancedSettings ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                    </button>
+
+                    {showAdvancedSettings && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] fade-in">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">CSV Delimiter</label>
+                          <CustomSelect 
+                            value={csvDelimiter} 
+                            onChange={setCsvDelimiter} 
+                            options={[
+                              { value: 'auto', label: 'Auto-detect' },
+                              { value: ',', label: 'Comma ( , )' },
+                              { value: ';', label: 'Semicolon ( ; )' },
+                              { value: '\t', label: 'Tab ( \\t )' }
+                            ]}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Parser Constraints</label>
+                          <label className="flex items-center gap-2.5 cursor-pointer bg-white border border-[var(--border)] px-3 rounded-xl hover:border-[var(--primary)] transition-colors w-full min-h-[38px] text-xs shadow-sm">
+                            <input 
+                              type="checkbox" 
+                              checked={strictMode}
+                              onChange={(e) => setStrictMode(e.target.checked)}
+                              className="accent-blue-600 w-4 h-4 cursor-pointer align-middle rounded"
+                            />
+                            <span className="text-[11px] text-[var(--text-primary)] font-semibold leading-none">Strict Mode (skip null rows)</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Ingestion Mode: Google Sheets URL */}
+              {ingestionMode === 'sheets' && (
+                <div className="fade-in p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)]">
+                  <h4 className="text-sm font-semibold mb-2">Google Sheets Import</h4>
+                  <p className="text-xs text-[var(--text-muted)] mb-4">Paste the link to your Google Sheet. Note: the spreadsheet must have sharing settings set to <strong>"Anyone with the link can view"</strong>.</p>
+                  
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="https://docs.google.com/spreadsheets/d/your-id-here/edit" 
+                      value={sheetsUrl}
+                      onChange={(e) => setSheetsUrl(e.target.value)}
+                      className="flex-1 px-4 py-2 text-xs rounded-xl border border-[var(--border)] outline-none focus:border-[var(--primary)] font-mono"
+                    />
+                    <button 
+                      onClick={loadGoogleSheet}
+                      className="btn-primary py-2 px-4 text-xs font-semibold cursor-pointer shrink-0"
+                    >
+                      Fetch & Ingest
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Ingestion Mode: Relational SQL Database */}
+              {ingestionMode === 'database' && (
+                <div className="fade-in p-4 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] flex flex-col gap-4">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-sm font-semibold">Direct Database Connector</h4>
+                    <div className="flex gap-2">
+                      <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
                         <input 
-                          type="checkbox" 
-                          checked={strictMode}
-                          onChange={(e) => setStrictMode(e.target.checked)}
-                          className="accent-blue-600 w-4 h-4 cursor-pointer align-middle rounded"
+                          type="radio" 
+                          name="dbtype" 
+                          checked={dbConfig.type === 'postgres'}
+                          onChange={() => setDbConfig({...dbConfig, type: 'postgres', port: 5432})}
                         />
-                        <span className="text-[11px] text-[var(--text-primary)] font-semibold leading-none">Strict Mode (skip null rows)</span>
+                        PostgreSQL
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="dbtype" 
+                          checked={dbConfig.type === 'mysql'}
+                          onChange={() => setDbConfig({...dbConfig, type: 'mysql', port: 3306})}
+                        />
+                        MySQL
                       </label>
                     </div>
                   </div>
-                )}
-              </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Host / Server IP</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. database-1.cluster.rds.amazonaws.com"
+                        value={dbConfig.host}
+                        onChange={(e) => setDbConfig({...dbConfig, host: e.target.value})}
+                        className="px-3 py-2 text-xs rounded-xl border border-[var(--border)] outline-none focus:border-[var(--primary)] font-mono"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Port</label>
+                      <input 
+                        type="number" 
+                        value={dbConfig.port}
+                        onChange={(e) => setDbConfig({...dbConfig, port: Number(e.target.value)})}
+                        className="px-3 py-2 text-xs rounded-xl border border-[var(--border)] outline-none focus:border-[var(--primary)] font-mono"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Database Name</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. sales_db"
+                        value={dbConfig.database}
+                        onChange={(e) => setDbConfig({...dbConfig, database: e.target.value})}
+                        className="px-3 py-2 text-xs rounded-xl border border-[var(--border)] outline-none focus:border-[var(--primary)] font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Username</label>
+                      <input 
+                        type="text" 
+                        placeholder="dbuser"
+                        value={dbConfig.user}
+                        onChange={(e) => setDbConfig({...dbConfig, user: e.target.value})}
+                        className="px-3 py-2 text-xs rounded-xl border border-[var(--border)] outline-none focus:border-[var(--primary)] font-mono"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Password</label>
+                      <input 
+                        type="password" 
+                        placeholder="••••••••"
+                        value={dbConfig.password}
+                        onChange={(e) => setDbConfig({...dbConfig, password: e.target.value})}
+                        className="px-3 py-2 text-xs rounded-xl border border-[var(--border)] outline-none focus:border-[var(--primary)] font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">SQL SELECT QUERY</label>
+                    <textarea 
+                      rows={3} 
+                      value={dbConfig.query}
+                      onChange={(e) => setDbConfig({...dbConfig, query: e.target.value})}
+                      className="px-3 py-2 text-xs rounded-xl border border-[var(--border)] outline-none focus:border-[var(--primary)] font-mono resize-y"
+                    />
+                  </div>
+
+                  <button 
+                    onClick={loadDatabaseDataset}
+                    className="btn-primary py-2.5 px-4 text-xs font-semibold cursor-pointer w-full text-center flex justify-center items-center gap-1.5"
+                  >
+                    <Database size={14} /> Execute Query & Import Data
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -3337,7 +3570,27 @@ STRICT RULES:
 
              const colsContext = columns.map(c => c.name).join(', ');
              const sampleData = JSON.stringify(data.slice(0, 3));
-             const systemPrompt = `You are an AI Data Assistant. The dataset has columns: ${colsContext}. Sample data: ${sampleData}.\n${activeMemory ? `Memory Context: ${activeMemory}\n` : ''}Provide concise, helpful answers.`;
+             const systemPrompt = `You are an AI Data Assistant. The dataset has columns: ${colsContext}. Sample data: ${sampleData}.\n${activeMemory ? `Memory Context: ${activeMemory}\n` : ''}Provide concise, helpful answers.
+
+             IMPORTANT: If the user asks you to plot, graph, draw, or visualize any data, you MUST do BOTH:
+             1. Write a clean JavaScript data transformation block wrapped in \`\`\`javascript and \`\`\` code block, preceded by the marker [AI_TRANSFORMER]. The code MUST map the array variable 'data' to a new array of objects. Keep the code pure (do not use external imports, write it directly). E.g.:
+                \`\`\`javascript
+                // [AI_TRANSFORMER]
+                const result = data.filter(d => Number(d.Sales) > 1000).map(d => ({ Country: d.Country, Sales: Number(d.Sales) }));
+                return result;
+                \`\`\`
+             2. Write a JSON chart spec configuration block wrapped in \`\`\`json and \`\`\` code block, preceded by the marker [AI_CHART_SPEC]. E.g.:
+                \`\`\`json
+                // [AI_CHART_SPEC]
+                {
+                  "type": "bar",
+                  "xAxis": "Country",
+                  "yAxis": "Sales",
+                  "title": "High Sales by Country"
+                }
+                \`\`\`
+             
+             Provide a concise, helpful explanation of the chart alongside.`;
              
              const historyForAPI = currentMessages.slice(1).map(m => ({
                  role: m.role,
@@ -3356,7 +3609,50 @@ STRICT RULES:
 
              const result = await callAI({ contents });
              
-             setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: result.text || "No response." }]);
+             const textResult = result.text || "No response.";
+             let processedChartData: any[] | undefined;
+             let processedChartConfig: any | undefined;
+             let extractedJsCode: string | undefined;
+
+             // Parse [AI_TRANSFORMER] JS code block
+             const jsMatch = textResult.match(/\[AI_TRANSFORMER\][\s\S]*?```javascript([\s\S]*?)```/i) || 
+                             textResult.match(/```javascript[\s\S]*?\/\/ \[AI_TRANSFORMER\]([\s\S]*?)```/i) || 
+                             textResult.match(/```javascript([\s\S]*?return[\s\S]*?)```/i);
+             
+             // Parse [AI_CHART_SPEC] JSON spec block
+             const jsonMatch = textResult.match(/\[AI_CHART_SPEC\][\s\S]*?```json([\s\S]*?)```/i) || 
+                              textResult.match(/```json[\s\S]*?\/\/ \[AI_CHART_SPEC\]([\s\S]*?)```/i) || 
+                              textResult.match(/```json([\s\S]*?type[\s\S]*?)```/i);
+
+             if (jsMatch) {
+                const code = jsMatch[1].trim();
+                extractedJsCode = code;
+                try {
+                   const wrapperBody = code.includes('return') ? code : `return (${code});`;
+                   const transformFn = new Function('data', `try { ${wrapperBody} } catch(e) { console.error(e); return []; }`);
+                   processedChartData = transformFn(data);
+                } catch (execErr) {
+                   console.error("AI sandbox code execution failed:", execErr);
+                }
+             }
+
+             if (jsonMatch) {
+                try {
+                   const cleanJsonStr = jsonMatch[1].replace(/\/\/.*$/gm, '').trim();
+                   processedChartConfig = JSON.parse(cleanJsonStr);
+                } catch (jsonErr) {
+                   console.error("AI chart spec JSON parse failed:", jsonErr);
+                }
+             }
+
+             setChatMessages(prev => [...prev, { 
+               id: Date.now().toString(), 
+               role: 'model', 
+               content: textResult,
+               aiChartData: processedChartData,
+               aiChartConfig: processedChartConfig,
+               aiCode: extractedJsCode
+             }]);
          } catch (e: any) {
              setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: "Failed to connect to AI server. Check your configuration."}]);
          } finally {
@@ -3459,7 +3755,70 @@ STRICT RULES:
                                 <Sparkles size={14} />
                             </div>
                         )}
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                        <div className="whitespace-pre-wrap">{msg.content.replace(/\[AI_TRANSFORMER\][\s\S]*?```javascript[\s\S]*?```/ig, '').replace(/\[AI_CHART_SPEC\][\s\S]*?```json[\s\S]*?```/ig, '').trim()}</div>
+
+                        {msg.aiChartData && msg.aiChartConfig && (
+                           <div className="mt-4 p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 shadow-lg flex flex-col gap-3">
+                              <div className="flex justify-between items-center">
+                                 <h4 className="text-xs font-semibold text-white tracking-wide uppercase">{msg.aiChartConfig.title || 'Dynamic AI Visualization'}</h4>
+                                 <span className="text-[9px] bg-indigo-500/20 text-indigo-300 font-mono px-2 py-0.5 rounded-full border border-indigo-500/30">AI RENDERED</span>
+                              </div>
+                              <div style={{ width: '100%', height: 220 }}>
+                                 <ResponsiveContainer width="100%" height="100%">
+                                    {msg.aiChartConfig.type === 'bar' ? (
+                                       <BarChart data={msg.aiChartData}>
+                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                          <XAxis dataKey={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <RechartsTooltip content={<CustomTooltip />} />
+                                          <Bar dataKey={msg.aiChartConfig.yAxis} fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                                       </BarChart>
+                                    ) : msg.aiChartConfig.type === 'line' ? (
+                                       <LineChart data={msg.aiChartData}>
+                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                          <XAxis dataKey={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <RechartsTooltip content={<CustomTooltip />} />
+                                          <Line type="monotone" dataKey={msg.aiChartConfig.yAxis} stroke="#8B5CF6" strokeWidth={2} />
+                                       </LineChart>
+                                    ) : msg.aiChartConfig.type === 'area' ? (
+                                       <AreaChart data={msg.aiChartData}>
+                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                          <XAxis dataKey={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <RechartsTooltip content={<CustomTooltip />} />
+                                          <Area type="monotone" dataKey={msg.aiChartConfig.yAxis} stroke="#EC4899" fill="rgba(236, 72, 153, 0.2)" />
+                                       </AreaChart>
+                                    ) : msg.aiChartConfig.type === 'pie' ? (
+                                       <PieChart>
+                                          <Pie data={msg.aiChartData} dataKey={msg.aiChartConfig.yAxis} nameKey={msg.aiChartConfig.xAxis} cx="50%" cy="50%" outerRadius={60} fill="#10B981" label>
+                                             {msg.aiChartData.map((_: any, index: number) => (
+                                                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                                             ))}
+                                          </Pie>
+                                          <RechartsTooltip content={<CustomTooltip />} />
+                                       </PieChart>
+                                    ) : (
+                                       <ScatterChart>
+                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                          <XAxis type="number" dataKey={msg.aiChartConfig.xAxis} name={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <YAxis type="number" dataKey={msg.aiChartConfig.yAxis} name={msg.aiChartConfig.yAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                          <RechartsTooltip content={<CustomTooltip />} />
+                                          <Scatter data={msg.aiChartData} fill="#F59E0B" />
+                                       </ScatterChart>
+                                    )}
+                                 </ResponsiveContainer>
+                              </div>
+                              {msg.aiCode && (
+                                 <details className="mt-2 text-[10px] text-slate-400 font-mono border-t border-slate-800/80 pt-2 cursor-pointer">
+                                    <summary className="hover:text-slate-200">View JavaScript Execution Log</summary>
+                                    <pre className="mt-2 p-2 bg-slate-950 rounded border border-slate-900 overflow-x-auto text-[9.5px]">
+                                       {msg.aiCode}
+                                    </pre>
+                                 </details>
+                              )}
+                           </div>
+                        )}
                     </div>
                 ))}
                 {chatTyping && (

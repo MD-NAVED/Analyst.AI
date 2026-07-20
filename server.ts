@@ -609,6 +609,61 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/import/db - Connects to MySQL/PostgreSQL, queries data, and returns rows as a dataset (Requires Auth)
+app.post('/api/import/db', authenticateToken, async (req, res) => {
+  try {
+    const body = sanitize(req.body);
+    const { type, host, port, user, password, database, query } = body;
+
+    if (!type || !host || !port || !user || !password || !database || !query) {
+      return res.status(400).json({ error: 'Bad Request: Missing database connection details.' });
+    }
+
+    if (type === 'postgres') {
+      const { Client } = await import('pg');
+      const client = new Client({
+        host,
+        port: Number(port),
+        user,
+        password,
+        database,
+        ssl: { rejectUnauthorized: false }
+      });
+      await client.connect();
+      try {
+        const result = await client.query(query);
+        await client.end();
+        return res.json({ rows: result.rows });
+      } catch (err: any) {
+        await client.end();
+        throw err;
+      }
+    } else if (type === 'mysql') {
+      const mysql = await import('mysql2/promise');
+      const connection = await mysql.createConnection({
+        host,
+        port: Number(port),
+        user,
+        password,
+        database
+      });
+      try {
+        const [rows] = await connection.execute(query);
+        await connection.end();
+        return res.json({ rows });
+      } catch (err: any) {
+        await connection.end();
+        throw err;
+      }
+    } else {
+      return res.status(400).json({ error: 'Unsupported database type.' });
+    }
+  } catch (error: any) {
+    console.error('Database connection import error:', error);
+    res.status(500).json({ error: 'Failed to query database. Verify connection credentials.' });
+  }
+});
+
 // GET /api/health - Returns service health
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
