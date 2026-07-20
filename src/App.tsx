@@ -1143,6 +1143,19 @@ function MainApp() {
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  // Ingestion Connectors States (Moved to top-level to prevent conditional hooks violations)
+  const [ingestionMode, setIngestionMode] = useState<'file' | 'sheets' | 'database'>('file');
+  const [sheetsUrl, setSheetsUrl] = useState('');
+  const [dbConfig, setDbConfig] = useState({
+    type: 'postgres',
+    host: '',
+    port: 5432,
+    user: '',
+    password: '',
+    database: '',
+    query: 'SELECT * FROM your_table LIMIT 1000'
+  });
+
   // Dashboard Builder States
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
   const [dashboardLayout, setDashboardLayout] = useState<any[]>([]);
@@ -2493,17 +2506,6 @@ STRICT RULES:
   };
 
   const UploadSection = () => {
-    const [ingestionMode, setIngestionMode] = useState<'file' | 'sheets' | 'database'>('file');
-    const [sheetsUrl, setSheetsUrl] = useState('');
-    const [dbConfig, setDbConfig] = useState({
-      type: 'postgres',
-      host: '',
-      port: 5432,
-      user: '',
-      password: '',
-      database: '',
-      query: 'SELECT * FROM your_table LIMIT 1000'
-    });
 
     const loadGoogleSheet = async () => {
       if (!sheetsUrl.trim()) {
