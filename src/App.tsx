@@ -3757,7 +3757,16 @@ STRICT RULES:
                                 <Sparkles size={14} />
                             </div>
                         )}
-                        <div className="whitespace-pre-wrap">{msg.content.replace(/```javascript[\s\S]*?AI_TRANSFORMER[\s\S]*?```/ig, '').replace(/```json[\s\S]*?AI_CHART_SPEC[\s\S]*?```/ig, '').replace(/\[AI_TRANSFORMER\]/ig, '').replace(/\[AI_CHART_SPEC\]/ig, '').trim()}</div>
+                        <div className="chat-message-text-styled">
+                          {renderMarkdown(
+                            msg.content
+                              .replace(/```javascript[\s\S]*?AI_TRANSFORMER[\s\S]*?```/ig, '')
+                              .replace(/```json[\s\S]*?AI_CHART_SPEC[\s\S]*?```/ig, '')
+                              .replace(/\[AI_TRANSFORMER\]/ig, '')
+                              .replace(/\[AI_CHART_SPEC\]/ig, '')
+                              .trim()
+                          )}
+                        </div>
 
                         {msg.aiChartData && msg.aiChartConfig && (
                            (() => {
