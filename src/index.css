@@ -1607,3 +1607,39 @@ select option, .premium-select option {
   background: rgba(59,130,246,0.07);
   color: var(--primary);
 }
+
+/* ============================================================
+ * ANALYST.AI BRAND LOGO — Responsive Rules
+ * ============================================================ */
+
+.analyst-ai-logo {
+  /* Enforce minimum clear space — equal to icon height (36px) on sides */
+  min-height: 24px;
+  cursor: default;
+  transition: opacity 0.18s ease;
+}
+
+.analyst-ai-logo:hover {
+  opacity: 0.88;
+}
+
+.analyst-ai-logo svg {
+  /* Prevent gradient distortion — no filter, no blur */
+  image-rendering: crisp-edges;
+  shape-rendering: geometricPrecision;
+}
+
+/* Hide wordmark on mobile, show icon only */
+@media (max-width: 639px) {
+  .analyst-ai-wordmark {
+    display: none !important;
+  }
+}
+
+/* Show full lockup on sm+ */
+@media (min-width: 640px) {
+  .analyst-ai-wordmark {
+    display: flex !important;
+  }
+}
+

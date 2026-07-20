@@ -1,0 +1,17 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" width="220" height="48">
+  <defs>
+    <linearGradient id="icon-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F7CFF"/>
+      <stop offset="100%" stop-color="#8A5CF6"/>
+    </linearGradient>
+  </defs>
+  <!-- Icon: rounded square 48x48 -->
+  <rect x="0" y="0" width="48" height="48" rx="10.5" ry="10.5" fill="url(#icon-grad)"/>
+  <!-- 3 ascending bars (proportional to 48px icon) -->
+  <rect x="10.5" y="21" width="6.5" height="14.5" rx="2" ry="2" fill="white"/>
+  <rect x="20.5" y="14.5" width="6.5" height="21" rx="2" ry="2" fill="white"/>
+  <rect x="30.5" y="8.5" width="6.5" height="27" rx="2" ry="2" fill="white"/>
+  <!-- Wordmark: "Analyst" in near-black, ".Ai" in purple -->
+  <text x="60" y="32" font-family="'Inter','Segoe UI',Arial,sans-serif" font-weight="500" font-size="22" fill="#1A1A2E" letter-spacing="-0.3">Analyst</text>
+  <text x="152" y="32" font-family="'Inter','Segoe UI',Arial,sans-serif" font-weight="500" font-size="22" fill="#6A5CF6" letter-spacing="-0.3">.Ai</text>
+</svg>

@@ -1,13 +1,13 @@
 {
-  "appName": "DataLens AI",
+  "appName": "Analyst.Ai",
   "appTagline": "AI-Powered Data Analytics Suite",
   "favicon": "/favicon.svg",
-  "logo": "/favicon.svg",
-  "logoWidth": 140,
+  "logo": "/analyst-ai-logo.svg",
+  "logoWidth": 160,
   "colors": {
-    "primary": "#3B82F6",
-    "primaryHover": "#2563EB",
-    "accent": "#8B5CF6",
+    "primary": "#4F7CFF",
+    "primaryHover": "#3A65F0",
+    "accent": "#8A5CF6",
     "success": "#22C55E",
     "warning": "#F59E0B",
     "danger": "#EF4444",
@@ -40,10 +40,10 @@
     "enableTour": true
   },
   "client": {
-    "id": "datalens-default",
-    "name": "DataLens AI",
-    "supportEmail": "support@datalens.ai",
+    "id": "analyst-ai-default",
+    "name": "Analyst.Ai",
+    "supportEmail": "support@analyst.ai",
     "supportPhone": "+1-800-555-0100",
-    "customDomain": "datalens.ai"
+    "customDomain": "analyst.ai"
   }
 }
