@@ -1,6 +1,6 @@
 {
-  "name": "DataLens AI",
-  "description": "An AI-powered data analytics and visualization tool.",
+  "name": "Analyst.Ai",
+  "description": "AI-powered data analytics platform — chat with your data, generate live charts, and export insights instantly.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
