@@ -3760,66 +3760,72 @@ STRICT RULES:
                         <div className="whitespace-pre-wrap">{msg.content.replace(/\[AI_TRANSFORMER\][\s\S]*?```javascript[\s\S]*?```/ig, '').replace(/\[AI_CHART_SPEC\][\s\S]*?```json[\s\S]*?```/ig, '').trim()}</div>
 
                         {msg.aiChartData && msg.aiChartConfig && (
-                           <div className="mt-4 p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 shadow-lg flex flex-col gap-3">
-                              <div className="flex justify-between items-center">
-                                 <h4 className="text-xs font-semibold text-white tracking-wide uppercase">{msg.aiChartConfig.title || 'Dynamic AI Visualization'}</h4>
-                                 <span className="text-[9px] bg-indigo-500/20 text-indigo-300 font-mono px-2 py-0.5 rounded-full border border-indigo-500/30">AI RENDERED</span>
-                              </div>
-                              <div style={{ width: '100%', height: 220 }}>
-                                 <ResponsiveContainer width="100%" height="100%">
-                                    {msg.aiChartConfig.type === 'bar' ? (
-                                       <BarChart data={msg.aiChartData}>
-                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                                          <XAxis dataKey={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <RechartsTooltip content={<CustomTooltip />} />
-                                          <Bar dataKey={msg.aiChartConfig.yAxis} fill="#3B82F6" radius={[4, 4, 0, 0]} />
-                                       </BarChart>
-                                    ) : msg.aiChartConfig.type === 'line' ? (
-                                       <LineChart data={msg.aiChartData}>
-                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                                          <XAxis dataKey={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <RechartsTooltip content={<CustomTooltip />} />
-                                          <Line type="monotone" dataKey={msg.aiChartConfig.yAxis} stroke="#8B5CF6" strokeWidth={2} />
-                                       </LineChart>
-                                    ) : msg.aiChartConfig.type === 'area' ? (
-                                       <AreaChart data={msg.aiChartData}>
-                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                                          <XAxis dataKey={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <RechartsTooltip content={<CustomTooltip />} />
-                                          <Area type="monotone" dataKey={msg.aiChartConfig.yAxis} stroke="#EC4899" fill="rgba(236, 72, 153, 0.2)" />
-                                       </AreaChart>
-                                    ) : msg.aiChartConfig.type === 'pie' ? (
-                                       <PieChart>
-                                          <Pie data={msg.aiChartData} dataKey={msg.aiChartConfig.yAxis} nameKey={msg.aiChartConfig.xAxis} cx="50%" cy="50%" outerRadius={60} fill="#10B981" label>
-                                             {msg.aiChartData.map((_: any, index: number) => (
-                                                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                                             ))}
-                                          </Pie>
-                                          <RechartsTooltip content={<CustomTooltip />} />
-                                       </PieChart>
-                                    ) : (
-                                       <ScatterChart>
-                                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                                          <XAxis type="number" dataKey={msg.aiChartConfig.xAxis} name={msg.aiChartConfig.xAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <YAxis type="number" dataKey={msg.aiChartConfig.yAxis} name={msg.aiChartConfig.yAxis} tick={{fill: '#94A3B8', fontSize: 10}} />
-                                          <RechartsTooltip content={<CustomTooltip />} />
-                                          <Scatter data={msg.aiChartData} fill="#F59E0B" />
-                                       </ScatterChart>
+                           (() => {
+                              const xAxisKey = msg.aiChartConfig.xAxis || (msg.aiChartConfig as any).category || (msg.aiChartConfig as any).key || '';
+                              const yAxisKey = msg.aiChartConfig.yAxis || (msg.aiChartConfig as any).value || '';
+                              return (
+                                 <div className="mt-4 p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-100 shadow-lg flex flex-col gap-3">
+                                    <div className="flex justify-between items-center">
+                                       <h4 className="text-xs font-semibold text-white tracking-wide uppercase">{msg.aiChartConfig.title || 'Dynamic AI Visualization'}</h4>
+                                       <span className="text-[9px] bg-indigo-500/20 text-indigo-300 font-mono px-2 py-0.5 rounded-full border border-indigo-500/30">AI RENDERED</span>
+                                    </div>
+                                    <div style={{ width: '100%', height: 220 }}>
+                                       <ResponsiveContainer width="100%" height="100%">
+                                          {msg.aiChartConfig.type === 'pie' ? (
+                                             <PieChart>
+                                                <Pie data={msg.aiChartData} dataKey={yAxisKey} nameKey={xAxisKey} cx="50%" cy="50%" outerRadius={60} fill="#10B981" label>
+                                                   {msg.aiChartData.map((_: any, index: number) => (
+                                                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                                                   ))}
+                                                </Pie>
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                             </PieChart>
+                                          ) : msg.aiChartConfig.type === 'bar' ? (
+                                             <BarChart data={msg.aiChartData}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                                <XAxis dataKey={xAxisKey} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Bar dataKey={yAxisKey} fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                                             </BarChart>
+                                          ) : msg.aiChartConfig.type === 'line' ? (
+                                             <LineChart data={msg.aiChartData}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                                <XAxis dataKey={xAxisKey} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Line type="monotone" dataKey={yAxisKey} stroke="#8B5CF6" strokeWidth={2} />
+                                             </LineChart>
+                                          ) : msg.aiChartConfig.type === 'area' ? (
+                                             <AreaChart data={msg.aiChartData}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                                <XAxis dataKey={xAxisKey} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <YAxis tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Area type="monotone" dataKey={yAxisKey} stroke="#EC4899" fill="rgba(236, 72, 153, 0.2)" />
+                                             </AreaChart>
+                                          ) : (
+                                             <ScatterChart>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                                <XAxis type="number" dataKey={xAxisKey} name={xAxisKey} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <YAxis type="number" dataKey={yAxisKey} name={yAxisKey} tick={{fill: '#94A3B8', fontSize: 10}} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Scatter data={msg.aiChartData} fill="#F59E0B" />
+                                             </ScatterChart>
+                                          )}
+                                       </ResponsiveContainer>
+                                    </div>
+                                    {msg.aiCode && (
+                                       <details className="mt-2 text-[10px] text-slate-400 font-mono border-t border-slate-800/80 pt-2 cursor-pointer">
+                                          <summary className="hover:text-slate-200">View JavaScript Execution Log</summary>
+                                          <pre className="mt-2 p-2 bg-slate-950 rounded border border-slate-900 overflow-x-auto text-[9.5px]">
+                                             {msg.aiCode}
+                                          </pre>
+                                       </details>
                                     )}
-                                 </ResponsiveContainer>
-                              </div>
-                              {msg.aiCode && (
-                                 <details className="mt-2 text-[10px] text-slate-400 font-mono border-t border-slate-800/80 pt-2 cursor-pointer">
-                                    <summary className="hover:text-slate-200">View JavaScript Execution Log</summary>
-                                    <pre className="mt-2 p-2 bg-slate-950 rounded border border-slate-900 overflow-x-auto text-[9.5px]">
-                                       {msg.aiCode}
-                                    </pre>
-                                 </details>
-                              )}
-                           </div>
+                                 </div>
+                              );
+                           })()
                         )}
                     </div>
                 ))}
